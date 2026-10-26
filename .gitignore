@@ -1,0 +1,7 @@
+# dane turnieju (osobiste dane zawodników i tokeny) nie mogą trafić do repozytorium
+data.json
+data.json.tmp
+
+# Python
+__pycache__/
+*.pyc

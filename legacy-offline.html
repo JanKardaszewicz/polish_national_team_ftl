@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zawodnicy i pule</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7280;
+    --border: #d9dde3;
+    --accent: #2563eb;
+    --danger: #dc2626;
+    --win: #15803d;
+    --win-bg: #dcfce7;
+    --lose: #b91c1c;
+    --lose-bg: #fee2e2;
+    --diag: #374151;
+    --error-bg: #fee2e2;
+    --error-text: #991b1b;
+    --notice-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418;
+      --panel: #1b2028;
+      --text: #e6e9ef;
+      --muted: #9aa3b2;
+      --border: #303743;
+      --accent: #60a5fa;
+      --danger: #f87171;
+      --win: #4ade80;
+      --win-bg: #14321f;
+      --lose: #f87171;
+      --lose-bg: #3b1d1d;
+      --diag: #0b0d10;
+      --error-bg: #3b1d1d;
+      --error-text: #fca5a5;
+      --notice-bg: #1e2740;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111418;
+    --panel: #1b2028;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --border: #303743;
+    --accent: #60a5fa;
+    --danger: #f87171;
+    --win: #4ade80;
+    --win-bg: #14321f;
+    --lose: #f87171;
+    --lose-bg: #3b1d1d;
+    --diag: #0b0d10;
+    --error-bg: #3b1d1d;
+    --error-text: #fca5a5;
+    --notice-bg: #1e2740;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  main { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 8px 0 12px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+  .tab { border-radius: 8px; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+  }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+  input {
+    font: inherit;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    min-width: 0;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:disabled { opacity: 0.6; }
+  input.score { width: 56px; text-align: center; padding: 6px; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .error {
+    display: none;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--error-bg);
+    color: var(--error-text);
+    font-size: 0.9rem;
+  }
+  .error.show { display: block; }
+  .notice {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: var(--notice-bg);
+    color: var(--text);
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.center, th.center { text-align: center; }
+  td.row-actions { text-align: right; }
+  td.row-actions button { padding: 4px 8px; margin-left: 4px; font-size: 0.85rem; }
+  td.win { color: var(--win); background: var(--win-bg); font-weight: 600; text-align: center; }
+  td.lose { color: var(--lose); background: var(--lose-bg); font-weight: 600; text-align: center; }
+  td.diag { background: var(--diag); }
+  td.cell { text-align: center; }
+  .empty { color: var(--muted); padding: 16px 0; text-align: center; }
+  .count { color: var(--muted); font-size: 0.9rem; margin-bottom: 8px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  tr.editing { background: var(--bg); }
+  .pool h2 { margin-bottom: 8px; }
+  .pool h3 { font-size: 0.95rem; margin: 16px 0 8px; color: var(--muted); }
+  .bout { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .bout .no { color: var(--muted); width: 2.2em; font-variant-numeric: tabular-nums; }
+  .bout .name { flex: 1 1 160px; min-width: 0; }
+  .bout .name.right { text-align: right; }
+  .bout .sep { color: var(--muted); }
+  @media (max-width: 520px) {
+    body { padding: 12px; }
+    h1 { font-size: 1.3rem; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Zawodnicy i pule</h1>
+
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" class="tab active" id="tab-fencers" aria-selected="true" aria-controls="view-fencers">Zawodnicy</button>
+    <button type="button" role="tab" class="tab" id="tab-pools" aria-selected="false" aria-controls="view-pools">Pule</button>
+  </nav>
+
+  <div id="view-fencers" role="tabpanel">
+    <div class="notice" id="fencer-lock-notice" hidden>
+      Lista jest zablokowana, bo pule są utworzone. Odblokuj ją w karcie Pule.
+    </div>
+
+    <section class="panel">
+      <h2 id="form-title">Dodaj zawodnika</h2>
+      <form id="fencer-form" novalidate>
+        <div class="grid">
+          <label>Nazwisko *
+            <input id="last-name" name="lastName" required maxlength="60" autocomplete="off">
+          </label>
+          <label>Imię *
+            <input id="first-name" name="firstName" required maxlength="60" autocomplete="off">
+          </label>
+          <label>Klub
+            <input id="club" name="club" maxlength="80" autocomplete="off">
+          </label>
+          <label>Kraj
+            <input id="country" name="country" maxlength="3" value="POL" autocomplete="off">
+          </label>
+          <label>Ranking *
+            <input id="ranking" name="ranking" type="number" min="1" step="1" required>
+          </label>
+        </div>
+        <div class="error" id="form-error" role="alert"></div>
+        <div class="actions">
+          <button type="submit" class="primary" id="submit-btn">Dodaj zawodnika</button>
+          <button type="button" id="cancel-btn" hidden>Anuluj edycję</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Lista zawodników</h2>
+      <div class="count" id="count"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th class="num">Ranking</th>
+              <th>Nazwisko</th>
+              <th>Imię</th>
+              <th>Klub</th>
+              <th>Kraj</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="fencer-rows"></tbody>
+        </table>
+        <div class="empty" id="empty" hidden>Brak zawodników. Dodaj pierwszego powyżej.</div>
+      </div>
+    </section>
+  </div>
+
+  <div id="view-pools" role="tabpanel" hidden>
+    <section class="panel">
+      <h2>Ustawienia pul</h2>
+      <div id="pool-create" class="grid">
+        <label>Rozmiar puli
+          <input id="pool-size" type="number" min="2" step="1" value="7">
+        </label>
+        <div class="muted" id="pool-count-info" style="align-self: end;"></div>
+      </div>
+      <div class="actions" id="pool-create-actions">
+        <button type="button" class="primary" id="create-pools-btn">Utwórz pule</button>
+      </div>
+      <div class="grid" style="margin-top: 12px;">
+        <label>Liczba awansujących (osób)
+          <input id="advance-count" type="number" min="0" step="1">
+        </label>
+      </div>
+      <div class="notice" id="pool-lock-notice" hidden>
+        <span>Pule są utworzone, lista zawodników jest zablokowana.</span>
+        <button type="button" class="danger" id="unlock-btn">Usuń pule i odblokuj listę</button>
+      </div>
+      <div class="error" id="pool-error" role="alert"></div>
+    </section>
+
+    <div id="pools-list"></div>
+
+    <section class="panel">
+      <h2>Ranking wszystkich pul</h2>
+      <div class="count" id="standings-note"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Miejsce</th>
+              <th>Nazwisko</th>
+              <th>Imię</th>
+              <th>Klub</th>
+              <th>Pula</th>
+              <th class="num">V</th>
+              <th class="num">M</th>
+              <th class="num">V/M</th>
+              <th class="num">TS</th>
+              <th class="num">TR</th>
+              <th class="num">Ind</th>
+              <th>Awans</th>
+            </tr>
+          </thead>
+          <tbody id="standings-rows"></tbody>
+        </table>
+        <div class="empty" id="standings-empty" hidden>Brak pul. Utwórz je powyżej.</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  var FENCERS_KEY = 'fencers.v1';
+  var POOLS_KEY = 'pools.v1';
+  var THRESHOLD = 5;
+  var DEFAULT_POOL_SIZE = 7;
+
+  // --- elementy: zawodnicy ---
+  var form = document.getElementById('fencer-form');
+  var lastNameInput = document.getElementById('last-name');
+  var firstNameInput = document.getElementById('first-name');
+  var clubInput = document.getElementById('club');
+  var countryInput = document.getElementById('country');
+  var rankingInput = document.getElementById('ranking');
+  var formTitle = document.getElementById('form-title');
+  var submitBtn = document.getElementById('submit-btn');
+  var cancelBtn = document.getElementById('cancel-btn');
+  var errorBox = document.getElementById('form-error');
+  var rowsBody = document.getElementById('fencer-rows');
+  var countBox = document.getElementById('count');
+  var emptyBox = document.getElementById('empty');
+  var fencerLockNotice = document.getElementById('fencer-lock-notice');
+
+  // --- elementy: pule ---
+  var tabFencers = document.getElementById('tab-fencers');
+  var tabPools = document.getElementById('tab-pools');
+  var viewFencers = document.getElementById('view-fencers');
+  var viewPools = document.getElementById('view-pools');
+  var poolSizeInput = document.getElementById('pool-size');
+  var poolCountInfo = document.getElementById('pool-count-info');
+  var poolCreateBox = document.getElementById('pool-create');
+  var poolCreateActions = document.getElementById('pool-create-actions');
+  var createPoolsBtn = document.getElementById('create-pools-btn');
+  var advanceInput = document.getElementById('advance-count');
+  var poolLockNotice = document.getElementById('pool-lock-notice');
+  var unlockBtn = document.getElementById('unlock-btn');
+  var poolError = document.getElementById('pool-error');
+  var poolsList = document.getElementById('pools-list');
+  var standingsNote = document.getElementById('standings-note');
+  var standingsBody = document.getElementById('standings-rows');
+  var standingsEmpty = document.getElementById('standings-empty');
+
+  var fencers = loadFencers();
+  var state = loadPools();
+  var editingId = null;
+
+  // ================= ZAWODNICY =================
+
+  function loadFencers() {
+    try {
+      var raw = localStorage.getItem(FENCERS_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      showError('Nie udało się odczytać zapisanych danych. Lista zaczyna się pusta.');
+      return [];
+    }
+  }
+
+  function saveFencers() {
+    try {
+      localStorage.setItem(FENCERS_KEY, JSON.stringify(fencers));
+      return true;
+    } catch (e) {
+      showError('Nie udało się zapisać danych w przeglądarce (np. tryb prywatny lub brak miejsca).');
+      return false;
+    }
+  }
+
+  function showError(message) {
+    errorBox.textContent = message;
+    errorBox.classList.add('show');
+  }
+
+  function clearError() {
+    errorBox.textContent = '';
+    errorBox.classList.remove('show');
+  }
+
+  function normalizeName(value) {
+    return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('pl');
+  }
+
+  function readForm() {
+    return {
+      lastName: lastNameInput.value.trim().replace(/\s+/g, ' '),
+      firstName: firstNameInput.value.trim().replace(/\s+/g, ' '),
+      club: clubInput.value.trim().replace(/\s+/g, ' '),
+      country: countryInput.value.trim().toLocaleUpperCase('pl') || 'POL',
+      ranking: Number(rankingInput.value)
+    };
+  }
+
+  // Zwraca komunikat błędu albo null, gdy dane są poprawne.
+  function validateFencer(data) {
+    if (!data.lastName) return 'Podaj nazwisko.';
+    if (!data.firstName) return 'Podaj imię.';
+    if (!Number.isInteger(data.ranking) || data.ranking < 1) {
+      return 'Ranking musi być liczbą całkowitą większą lub równą 1.';
+    }
+
+    var others = fencers.filter(function (f) { return f.id !== editingId; });
+
+    var sameRanking = others.find(function (f) { return f.ranking === data.ranking; });
+    if (sameRanking) {
+      return 'Ranking ' + data.ranking + ' jest już przypisany do: ' +
+        sameRanking.lastName + ' ' + sameRanking.firstName + '.';
+    }
+
+    var sameName = others.find(function (f) {
+      return normalizeName(f.lastName) === normalizeName(data.lastName) &&
+             normalizeName(f.firstName) === normalizeName(data.firstName);
+    });
+    if (sameName) {
+      return 'Zawodnik ' + data.lastName + ' ' + data.firstName +
+        ' jest już na liście (ranking ' + sameName.ranking + ').';
+    }
+
+    return null;
+  }
+
+  function newId() {
+    return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function fencerById(id) {
+    return fencers.find(function (f) { return f.id === id; }) || { id: id, lastName: '?', firstName: '', club: '', ranking: 0 };
+  }
+
+  function fencerLabel(f) {
+    return f.lastName + ' ' + f.firstName;
+  }
+
+  function resetForm() {
+    form.reset();
+    countryInput.value = 'POL';
+    editingId = null;
+    formTitle.textContent = 'Dodaj zawodnika';
+    submitBtn.textContent = 'Dodaj zawodnika';
+    cancelBtn.hidden = true;
+    clearError();
+  }
+
+  function startEdit(id) {
+    if (isLocked()) return;
+    var fencer = fencers.find(function (f) { return f.id === id; });
+    if (!fencer) return;
+    editingId = id;
+    lastNameInput.value = fencer.lastName;
+    firstNameInput.value = fencer.firstName;
+    clubInput.value = fencer.club || '';
+    countryInput.value = fencer.country || 'POL';
+    rankingInput.value = fencer.ranking;
+    formTitle.textContent = 'Edycja zawodnika';
+    submitBtn.textContent = 'Zapisz zmiany';
+    cancelBtn.hidden = false;
+    clearError();
+    lastNameInput.focus();
+  }
+
+  function deleteFencer(id) {
+    if (isLocked()) return;
+    var fencer = fencers.find(function (f) { return f.id === id; });
+    if (!fencer) return;
+    if (!window.confirm('Usunąć zawodnika ' + fencerLabel(fencer) + '?')) return;
+    var previous = fencers;
+    fencers = fencers.filter(function (f) { return f.id !== id; });
+    if (!saveFencers()) {
+      fencers = previous;
+      return;
+    }
+    if (editingId === id) resetForm();
+    render();
+  }
+
+  function renderFencers() {
+    var locked = isLocked();
+    var sorted = fencers.slice().sort(function (a, b) {
+      if (a.ranking !== b.ranking) return a.ranking - b.ranking;
+      return a.lastName.localeCompare(b.lastName, 'pl');
+    });
+
+    rowsBody.textContent = '';
+    sorted.forEach(function (f) {
+      var tr = document.createElement('tr');
+      if (f.id === editingId) tr.className = 'editing';
+
+      appendCell(tr, String(f.ranking), 'num');
+      appendCell(tr, f.lastName);
+      appendCell(tr, f.firstName);
+      appendCell(tr, f.club || '—');
+      appendCell(tr, f.country || '');
+
+      var actions = document.createElement('td');
+      actions.className = 'row-actions';
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.textContent = 'Edytuj';
+      editBtn.disabled = locked;
+      editBtn.addEventListener('click', function () { startEdit(f.id); });
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'danger';
+      delBtn.textContent = 'Usuń';
+      delBtn.disabled = locked;
+      delBtn.addEventListener('click', function () { deleteFencer(f.id); });
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      tr.appendChild(actions);
+
+      rowsBody.appendChild(tr);
+    });
+
+    countBox.textContent = 'Liczba zawodników: ' + fencers.length;
+    emptyBox.hidden = fencers.length > 0;
+  }
+
+  function appendCell(tr, text, className) {
+    var td = document.createElement('td');
+    if (className) td.className = className;
+    td.textContent = text;
+    tr.appendChild(td);
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    clearError();
+    if (isLocked()) {
+      showError('Lista jest zablokowana, bo pule są utworzone.');
+      return;
+    }
+
+    var data = readForm();
+    var message = validateFencer(data);
+    if (message) {
+      showError(message);
+      return;
+    }
+
+    var previous = fencers;
+    if (editingId) {
+      fencers = fencers.map(function (f) {
+        return f.id === editingId ? Object.assign({}, f, data) : f;
+      });
+    } else {
+      fencers = fencers.concat([Object.assign({ id: newId() }, data)]);
+    }
+
+    if (!saveFencers()) {
+      fencers = previous;
+      return;
+    }
+
+    resetForm();
+    render();
+    lastNameInput.focus();
+  });
+
+  cancelBtn.addEventListener('click', resetForm);
+
+  // ================= PULE =================
+
+  function loadPools() {
+    var empty = { poolSize: DEFAULT_POOL_SIZE, advanceCount: null, groups: [] };
+    try {
+      var raw = localStorage.getItem(POOLS_KEY);
+      if (!raw) return empty;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.groups)) return empty;
+      return {
+        poolSize: parsed.poolSize || DEFAULT_POOL_SIZE,
+        advanceCount: typeof parsed.advanceCount === 'number' ? parsed.advanceCount : null,
+        groups: parsed.groups
+      };
+    } catch (e) {
+      showPoolError('Nie udało się odczytać zapisanych pul. Widok pul zaczyna się pusty.');
+      return empty;
+    }
+  }
+
+  function savePools() {
+    try {
+      localStorage.setItem(POOLS_KEY, JSON.stringify(state));
+      return true;
+    } catch (e) {
+      showPoolError('Nie udało się zapisać pul w przeglądarce (np. tryb prywatny lub brak miejsca).');
+      return false;
+    }
+  }
+
+  function showPoolError(message) {
+    poolError.textContent = message;
+    poolError.classList.add('show');
+  }
+
+  function clearPoolError() {
+    poolError.textContent = '';
+    poolError.classList.remove('show');
+  }
+
+  function isLocked() {
+    return state.groups.length > 0;
+  }
+
+  // Algorytm "węża": zawodnicy posortowani po rankingu idą do pul 1..P, potem z powrotem P..1.
+  function snakeDistribute(sortedIds, poolCount) {
+    var groups = [];
+    for (var p = 0; p < poolCount; p++) {
+      groups.push({ name: 'Pula ' + (p + 1), fencerIds: [], bouts: [] });
+    }
+    sortedIds.forEach(function (id, i) {
+      var row = Math.floor(i / poolCount);
+      var col = i % poolCount;
+      var p = row % 2 === 0 ? col : poolCount - 1 - col;
+      groups[p].fencerIds.push(id);
+    });
+    return groups;
+  }
+
+  // Każdy z każdym, kolejność rund metodą kołową.
+  function roundRobin(ids) {
+    var list = ids.slice();
+    if (list.length % 2 === 1) list.push(null);
+    var n = list.length;
+    var bouts = [];
+    for (var r = 0; r < n - 1; r++) {
+      for (var i = 0; i < n / 2; i++) {
+        var a = list[i];
+        var b = list[n - 1 - i];
+        if (a && b) bouts.push({ a: a, b: b, sa: null, sb: null });
+      }
+      list = [list[0]].concat(list.slice(n - 1)).concat(list.slice(1, n - 1));
+    }
+    return bouts;
+  }
+
+  function createPools() {
+    clearPoolError();
+    if (isLocked()) return;
+
+    var size = Number(poolSizeInput.value);
+    if (fencers.length < 2) {
+      showPoolError('Dodaj co najmniej dwóch zawodników.');
+      return;
+    }
+    if (!Number.isInteger(size) || size < 2 || size > fencers.length) {
+      showPoolError('Rozmiar puli musi być liczbą całkowitą od 2 do ' + fencers.length + '.');
+      return;
+    }
+
+    var advanceRaw = advanceInput.value.trim();
+    var advance = advanceRaw === '' ? Math.floor(fencers.length * 0.8) : Number(advanceRaw);
+    if (!Number.isInteger(advance) || advance < 0 || advance > fencers.length) {
+      showPoolError('Liczba awansujących musi być liczbą od 0 do ' + fencers.length + '.');
+      return;
+    }
+
+    var poolCount = Math.ceil(fencers.length / size);
+    var sortedIds = fencers.slice().sort(function (a, b) {
+      return a.ranking - b.ranking;
+    }).map(function (f) { return f.id; });
+
+    var groups = snakeDistribute(sortedIds, poolCount);
+    groups.forEach(function (g) {
+      g.bouts = roundRobin(g.fencerIds);
+    });
+
+    var previous = state;
+    state = { poolSize: size, advanceCount: advance, groups: groups };
+    if (!savePools()) {
+      state = previous;
+      return;
+    }
+    renderAll();
+  }
+
+  function unlockPools() {
+    if (!window.confirm('Usunąć wszystkie pule i wyniki? Lista zawodników zostanie odblokowana.')) return;
+    var previous = state;
+    state = { poolSize: state.poolSize, advanceCount: state.advanceCount, groups: [] };
+    if (!savePools()) {
+      state = previous;
+      return;
+    }
+    renderAll();
+  }
+
+  // Wynik: liczba 0..THRESHOLD, pusty string -> null, błąd -> undefined.
+  function parseScore(value) {
+    var text = value.trim();
+    if (text === '') return null;
+    var n = Number(text);
+    if (!Number.isInteger(n) || n < 0 || n > THRESHOLD) return undefined;
+    return n;
+  }
+
+  // Pełny wynik: zwycięzca ma dokładnie THRESHOLD, przegrany mniej. Wynik częściowy jest dozwolony, ale się nie liczy.
+  function validateBout(sa, sb) {
+    if (sa === null || sb === null) return null;
+    if (sa === THRESHOLD && sb === THRESHOLD) return 'Oba wyniki nie mogą wynosić ' + THRESHOLD + '.';
+    if (sa !== THRESHOLD && sb !== THRESHOLD) return 'Zwycięzca musi mieć dokładnie ' + THRESHOLD + ' trafień.';
+    return null;
+  }
+
+  function onScoreChange(gi, k, saInput, sbInput) {
+    clearPoolError();
+    var sa = parseScore(saInput.value);
+    var sb = parseScore(sbInput.value);
+    if (sa === undefined || sb === undefined) {
+      showPoolError('Wynik musi być liczbą całkowitą od 0 do ' + THRESHOLD + '.');
+      return;
+    }
+    var message = validateBout(sa, sb);
+    if (message) {
+      showPoolError(message);
+      return;
+    }
+
+    var g = state.groups[gi];
+    var previous = { sa: g.bouts[k].sa, sb: g.bouts[k].sb };
+    g.bouts[k].sa = sa;
+    g.bouts[k].sb = sb;
+    if (!savePools()) {
+      g.bouts[k].sa = previous.sa;
+      g.bouts[k].sb = previous.sb;
+      return;
+    }
+    redrawPool(gi);
+    renderStandings();
+  }
+
+  // Statystyki puli: V, M, TS, TR, Ind, V/M. Liczą się tylko pełne wyniki.
+  function poolStats(group) {
+    var byId = {};
+    var list = group.fencerIds.map(function (id) {
+      var st = { id: id, V: 0, M: 0, TS: 0, TR: 0 };
+      byId[id] = st;
+      return st;
+    });
+    group.bouts.forEach(function (b) {
+      if (b.sa === null || b.sb === null) return;
+      var A = byId[b.a];
+      var B = byId[b.b];
+      A.M++;
+      B.M++;
+      A.TS += b.sa;
+      A.TR += b.sb;
+      B.TS += b.sb;
+      B.TR += b.sa;
+      if (b.sa > b.sb) A.V++;
+      else B.V++;
+    });
+    list.forEach(function (st) {
+      st.VM = st.M ? st.V / st.M : 0;
+      st.Ind = st.TS - st.TR;
+    });
+    return list;
+  }
+
+  function compareStats(x, y) {
+    return (y.VM - x.VM) || (y.Ind - x.Ind) || (y.TS - x.TS);
+  }
+
+  // Miejsca z remisami: wspólne miejsce oznaczane jako "3T".
+  function rankStats(list) {
+    var sorted = list.slice().sort(compareStats);
+    var prev = null;
+    var place = 0;
+    sorted.forEach(function (st, i) {
+      if (!prev || compareStats(prev, st) !== 0) place = i + 1;
+      st.place = place;
+      prev = st;
+    });
+    var counts = {};
+    sorted.forEach(function (st) {
+      counts[st.place] = (counts[st.place] || 0) + 1;
+    });
+    sorted.forEach(function (st) {
+      st.label = counts[st.place] > 1 ? st.place + 'T' : String(st.place);
+    });
+    return sorted;
+  }
+
+  function poolComplete(group) {
+    return group.bouts.every(function (b) { return b.sa !== null && b.sb !== null; });
+  }
+
+  function cellFor(group, x, y) {
+    var b = group.bouts.find(function (bout) {
+      return (bout.a === x && bout.b === y) || (bout.a === y && bout.b === x);
+    });
+    if (!b || b.sa === null || b.sb === null) return { text: '', cls: '' };
+    var mine = b.a === x ? b.sa : b.sb;
+    var theirs = b.a === x ? b.sb : b.sa;
+    return mine > theirs ? { text: 'V' + mine, cls: 'win' } : { text: 'D' + mine, cls: 'lose' };
+  }
+
+  function buildMatrix(gi) {
+    var g = state.groups[gi];
+    var stats = rankStats(poolStats(g));
+    var byId = {};
+    stats.forEach(function (st) { byId[st.id] = st; });
+
+    var table = document.createElement('table');
+    var thead = document.createElement('thead');
+    var headRow = document.createElement('tr');
+    appendHeader(headRow, '#', 'center');
+    appendHeader(headRow, 'Zawodnik');
+    g.fencerIds.forEach(function (_, j) { appendHeader(headRow, String(j + 1), 'center'); });
+    appendHeader(headRow, 'V', 'num');
+    appendHeader(headRow, 'V/M', 'num');
+    appendHeader(headRow, 'TS', 'num');
+    appendHeader(headRow, 'TR', 'num');
+    appendHeader(headRow, 'Ind', 'num');
+    appendHeader(headRow, 'Miejsce', 'center');
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    g.fencerIds.forEach(function (id, i) {
+      var f = fencerById(id);
+      var st = byId[id];
+      var tr = document.createElement('tr');
+      appendCell(tr, String(i + 1), 'center');
+      appendCell(tr, fencerLabel(f));
+      g.fencerIds.forEach(function (otherId, j) {
+        if (i === j) {
+          var diag = document.createElement('td');
+          diag.className = 'diag';
+          tr.appendChild(diag);
+          return;
+        }
+        var cell = cellFor(g, id, otherId);
+        var td = document.createElement('td');
+        td.className = cell.cls ? cell.cls : 'cell';
+        td.textContent = cell.text;
+        tr.appendChild(td);
+      });
+      appendCell(tr, String(st.V), 'num');
+      appendCell(tr, st.M ? st.VM.toFixed(2) : '0.00', 'num');
+      appendCell(tr, String(st.TS), 'num');
+      appendCell(tr, String(st.TR), 'num');
+      appendCell(tr, (st.Ind > 0 ? '+' : '') + st.Ind, 'num');
+      appendCell(tr, st.label, 'center');
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function appendHeader(tr, text, className) {
+    var th = document.createElement('th');
+    if (className) th.className = className;
+    th.textContent = text;
+    tr.appendChild(th);
+  }
+
+  function buildBouts(gi) {
+    var g = state.groups[gi];
+    var wrap = document.createElement('div');
+    g.bouts.forEach(function (b, k) {
+      var row = document.createElement('div');
+      row.className = 'bout';
+
+      var no = document.createElement('span');
+      no.className = 'no';
+      no.textContent = (k + 1) + '.';
+
+      var nameA = document.createElement('span');
+      nameA.className = 'name';
+      nameA.textContent = fencerLabel(fencerById(b.a));
+
+      var saInput = document.createElement('input');
+      saInput.type = 'number';
+      saInput.className = 'score';
+      saInput.min = '0';
+      saInput.max = String(THRESHOLD);
+      saInput.step = '1';
+      saInput.inputMode = 'numeric';
+      saInput.value = b.sa === null ? '' : String(b.sa);
+      saInput.setAttribute('aria-label', 'Trafienia: ' + fencerLabel(fencerById(b.a)));
+
+      var sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = ':';
+
+      var sbInput = document.createElement('input');
+      sbInput.type = 'number';
+      sbInput.className = 'score';
+      sbInput.min = '0';
+      sbInput.max = String(THRESHOLD);
+      sbInput.step = '1';
+      sbInput.inputMode = 'numeric';
+      sbInput.value = b.sb === null ? '' : String(b.sb);
+      sbInput.setAttribute('aria-label', 'Trafienia: ' + fencerLabel(fencerById(b.b)));
+
+      var nameB = document.createElement('span');
+      nameB.className = 'name right';
+      nameB.textContent = fencerLabel(fencerById(b.b));
+
+      saInput.addEventListener('change', function () { onScoreChange(gi, k, saInput, sbInput); });
+      sbInput.addEventListener('change', function () { onScoreChange(gi, k, saInput, sbInput); });
+
+      row.appendChild(no);
+      row.appendChild(nameA);
+      row.appendChild(saInput);
+      row.appendChild(sep);
+      row.appendChild(sbInput);
+      row.appendChild(nameB);
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  function poolTitleText(g) {
+    return g.name + ' (' + g.fencerIds.length + ' zawodników)' +
+      (poolComplete(g) ? ' — zakończona' : '');
+  }
+
+  function redrawPool(gi) {
+    var box = poolsList.querySelector('[data-matrix="' + gi + '"]');
+    if (!box) return;
+    box.textContent = '';
+    box.appendChild(buildMatrix(gi));
+    var title = poolsList.querySelector('[data-title="' + gi + '"]');
+    if (title) title.textContent = poolTitleText(state.groups[gi]);
+  }
+
+  function renderPools() {
+    poolsList.textContent = '';
+    if (!isLocked()) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Brak pul. Ustaw rozmiar puli i kliknij „Utwórz pule”.';
+      poolsList.appendChild(empty);
+      return;
+    }
+
+    state.groups.forEach(function (g, gi) {
+      var card = document.createElement('section');
+      card.className = 'panel pool';
+
+      var title = document.createElement('h2');
+      title.setAttribute('data-title', String(gi));
+      title.textContent = poolTitleText(g);
+      card.appendChild(title);
+
+      var matrixWrap = document.createElement('div');
+      matrixWrap.className = 'table-wrap';
+      matrixWrap.setAttribute('data-matrix', String(gi));
+      matrixWrap.appendChild(buildMatrix(gi));
+      card.appendChild(matrixWrap);
+
+      var boutsTitle = document.createElement('h3');
+      boutsTitle.textContent = 'Kolejność walk (wpisz wyniki, szachownica uaktualni się automatycznie)';
+      card.appendChild(boutsTitle);
+      card.appendChild(buildBouts(gi));
+
+      poolsList.appendChild(card);
+    });
+  }
+
+  function renderStandings() {
+    standingsBody.textContent = '';
+    if (!isLocked()) {
+      standingsEmpty.hidden = false;
+      standingsNote.textContent = '';
+      return;
+    }
+    standingsEmpty.hidden = true;
+
+    var all = [];
+    state.groups.forEach(function (g) {
+      poolStats(g).forEach(function (st) {
+        st.pool = g.name;
+        all.push(st);
+      });
+    });
+    var ranked = rankStats(all);
+    var complete = state.groups.every(poolComplete);
+    var advance = state.advanceCount === null ? 0 : state.advanceCount;
+
+    ranked.forEach(function (st, i) {
+      var f = fencerById(st.id);
+      var tr = document.createElement('tr');
+      appendCell(tr, st.label, 'center');
+      appendCell(tr, f.lastName);
+      appendCell(tr, f.firstName);
+      appendCell(tr, f.club || '—');
+      appendCell(tr, st.pool);
+      appendCell(tr, String(st.V), 'num');
+      appendCell(tr, String(st.M), 'num');
+      appendCell(tr, st.M ? st.VM.toFixed(2) : '0.00', 'num');
+      appendCell(tr, String(st.TS), 'num');
+      appendCell(tr, String(st.TR), 'num');
+      appendCell(tr, (st.Ind > 0 ? '+' : '') + st.Ind, 'num');
+      appendCell(tr, complete && i < advance ? 'Awans' : '');
+      standingsBody.appendChild(tr);
+    });
+
+    if (complete) {
+      standingsNote.textContent = 'Awansuje ' + advance + ' z ' + all.length + ' zawodników.';
+    } else {
+      standingsNote.textContent = 'Status awansu pojawi się po zakończeniu wszystkich pul.';
+    }
+  }
+
+  function updatePoolControls() {
+    var locked = isLocked();
+    poolCreateBox.hidden = locked;
+    poolCreateActions.hidden = locked;
+    poolLockNotice.hidden = !locked;
+    fencerLockNotice.hidden = !locked;
+
+    var fencerControlsDisabled = locked;
+    lastNameInput.disabled = fencerControlsDisabled;
+    firstNameInput.disabled = fencerControlsDisabled;
+    clubInput.disabled = fencerControlsDisabled;
+    countryInput.disabled = fencerControlsDisabled;
+    rankingInput.disabled = fencerControlsDisabled;
+    submitBtn.disabled = fencerControlsDisabled;
+
+    if (state.advanceCount !== null) {
+      advanceInput.value = String(state.advanceCount);
+    } else if (advanceInput.value === '') {
+      advanceInput.value = String(Math.floor(fencers.length * 0.8));
+    }
+    if (!locked) updatePoolCountInfo();
+  }
+
+  function updatePoolCountInfo() {
+    var size = Number(poolSizeInput.value);
+    if (!Number.isInteger(size) || size < 2 || fencers.length < 2) {
+      poolCountInfo.textContent = '';
+      return;
+    }
+    poolCountInfo.textContent = 'Liczba pul: ' + Math.ceil(fencers.length / size);
+  }
+
+  function onAdvanceChange() {
+    clearPoolError();
+    var raw = advanceInput.value.trim();
+    var value = raw === '' ? 0 : Number(raw);
+    if (!Number.isInteger(value) || value < 0 || value > fencers.length) {
+      showPoolError('Liczba awansujących musi być liczbą od 0 do ' + fencers.length + '.');
+      return;
+    }
+    var previous = state.advanceCount;
+    state.advanceCount = value;
+    if (!savePools()) {
+      state.advanceCount = previous;
+      return;
+    }
+    renderStandings();
+  }
+
+  function showView(name) {
+    var isFencers = name === 'fencers';
+    viewFencers.hidden = !isFencers;
+    viewPools.hidden = isFencers;
+    tabFencers.classList.toggle('active', isFencers);
+    tabPools.classList.toggle('active', !isFencers);
+    tabFencers.setAttribute('aria-selected', String(isFencers));
+    tabPools.setAttribute('aria-selected', String(!isFencers));
+  }
+
+  function render() {
+    renderFencers();
+    updatePoolControls();
+  }
+
+  function renderAll() {
+    render();
+    renderPools();
+    renderStandings();
+    updatePoolControls();
+  }
+
+  tabFencers.addEventListener('click', function () { showView('fencers'); });
+  tabPools.addEventListener('click', function () { showView('pools'); });
+  poolSizeInput.addEventListener('input', updatePoolCountInfo);
+  createPoolsBtn.addEventListener('click', createPools);
+  unlockBtn.addEventListener('click', unlockPools);
+  advanceInput.addEventListener('change', onAdvanceChange);
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

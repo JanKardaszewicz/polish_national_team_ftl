@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Zapis na turniej</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --text: #1d2330;
+    --muted: #6b7280;
+    --border: #d9dde3;
+    --accent: #2563eb;
+    --ok-bg: #dcfce7;
+    --ok-text: #166534;
+    --warn-bg: #fef3c7;
+    --warn-text: #92400e;
+    --error-bg: #fee2e2;
+    --error-text: #991b1b;
+    --next-bg: #eef2ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418;
+      --panel: #1b2028;
+      --text: #e6e9ef;
+      --muted: #9aa3b2;
+      --border: #303743;
+      --accent: #60a5fa;
+      --ok-bg: #14321f;
+      --ok-text: #86efac;
+      --warn-bg: #3a2c10;
+      --warn-text: #fcd34d;
+      --error-bg: #3b1d1d;
+      --error-text: #fca5a5;
+      --next-bg: #1e2740;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111418;
+    --panel: #1b2028;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --border: #303743;
+    --accent: #60a5fa;
+    --ok-bg: #14321f;
+    --ok-text: #86efac;
+    --warn-bg: #3a2c10;
+    --warn-text: #fcd34d;
+    --error-bg: #3b1d1d;
+    --error-text: #fca5a5;
+    --next-bg: #1e2740;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  main { max-width: 460px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 8px 0 16px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .panel h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); margin-bottom: 12px; }
+  input {
+    font: inherit;
+    font-size: 1rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    min-width: 0;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button {
+    font: inherit;
+    font-size: 1rem;
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .error, .ok, .warn {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+  }
+  .error { background: var(--error-bg); color: var(--error-text); }
+  .ok { background: var(--ok-bg); color: var(--ok-text); }
+  .warn { background: var(--warn-bg); color: var(--warn-text); }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  dl { margin: 0 0 12px; }
+  dt { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
+  dd { margin: 2px 0 0; font-size: 1.05rem; }
+
+  .bout-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .bout-card.next { background: var(--next-bg); border-color: var(--accent); }
+  .bout-card .where { color: var(--muted); font-size: 0.85rem; }
+  .bout-card .vs { font-size: 1.1rem; margin: 4px 0; }
+  .bout-card .line { font-size: 0.9rem; margin: 4px 0; }
+  .bout-card .result { font-size: 1.05rem; font-weight: 600; margin: 6px 0; }
+  .bout-card .result.win { color: var(--ok-text); }
+  .bout-card .result.lose { color: var(--error-text); }
+  .score-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+  .score-form label { flex: 1; margin: 0; }
+  .score-form input { width: 100%; text-align: center; }
+  .score-form button { width: auto; flex: 1.4; }
+  .bout-card button.secondary { margin-top: 8px; }
+  .ref-item { font-size: 0.95rem; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .ref-item:last-child { border-bottom: 0; }
+  .ref-item.done { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Zapis na turniej</h1>
+
+  <section class="panel" id="loading">Ładowanie…</section>
+
+  <section class="panel" id="closed" hidden>
+    <h2>Zapisy są zamknięte</h2>
+    <p class="muted">Zapytaj organizatora, jeśli chcesz wziąć udział w turnieju.</p>
+  </section>
+
+  <section class="panel" id="register" hidden>
+    <h2>Wpisz swoje dane</h2>
+    <form id="register-form" novalidate>
+      <label>Imię *
+        <input id="first-name" maxlength="60" autocomplete="given-name" required>
+      </label>
+      <label>Nazwisko *
+        <input id="last-name" maxlength="60" autocomplete="family-name" required>
+      </label>
+      <label>Klub (opcjonalnie)
+        <input id="club" maxlength="80" autocomplete="off">
+      </label>
+      <div class="error" id="register-error" role="alert" hidden></div>
+      <button type="submit" id="register-btn">Zapisz mnie</button>
+      <p class="muted">Ranking pobierzemy automatycznie z klasyfikacji PZSzerm. Jeśli Cię w niej nie ma, dostajesz ranking 999.</p>
+    </form>
+  </section>
+
+  <div id="profile" hidden>
+    <section class="panel">
+      <h2 id="profile-title">Jesteś zapisany</h2>
+      <div class="ok" id="profile-new" hidden>Zapis przyjęty.</div>
+      <dl>
+        <dt>Zawodnik</dt><dd id="p-name"></dd>
+        <dt>Klub</dt><dd id="p-club"></dd>
+        <dt>Ranking</dt><dd id="p-ranking"></dd>
+        <dt id="p-pool-label" hidden>Pula</dt><dd id="p-pool" hidden></dd>
+      </dl>
+      <p class="muted">Ten telefon jest Twoim kluczem do zapisu. Nie czyść danych przeglądarki. Jeśli stracisz dostęp, poproś organizatora o osobisty kod QR.</p>
+    </section>
+
+    <section class="panel" id="next-panel" hidden>
+      <h2>Twój następny mecz</h2>
+      <div id="next-box"></div>
+    </section>
+
+    <section class="panel" id="matches-panel" hidden>
+      <h2>Twoje mecze</h2>
+      <div id="matches"></div>
+    </section>
+
+    <section class="panel" id="refereeing-panel" hidden>
+      <h2>Sędziujesz</h2>
+      <div id="refereeing"></div>
+    </section>
+
+    <section class="panel" id="waiting-panel" hidden>
+      <p class="muted" id="waiting-text"></p>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  var TOKEN_KEY = 'fencing.token';
+  var POLL_MS = 8000;
+  var token = null;
+  var lastView = '';
+  var pollTimer = null;
+
+  var sections = {
+    loading: document.getElementById('loading'),
+    closed: document.getElementById('closed'),
+    register: document.getElementById('register'),
+    profile: document.getElementById('profile')
+  };
+  var form = document.getElementById('register-form');
+  var firstNameInput = document.getElementById('first-name');
+  var lastNameInput = document.getElementById('last-name');
+  var clubInput = document.getElementById('club');
+  var registerBtn = document.getElementById('register-btn');
+  var registerError = document.getElementById('register-error');
+
+  var nextPanel = document.getElementById('next-panel');
+  var nextBox = document.getElementById('next-box');
+  var matchesPanel = document.getElementById('matches-panel');
+  var matchesBox = document.getElementById('matches');
+  var refereeingPanel = document.getElementById('refereeing-panel');
+  var refereeingBox = document.getElementById('refereeing');
+  var waitingPanel = document.getElementById('waiting-panel');
+  var waitingText = document.getElementById('waiting-text');
+
+  function show(name) {
+    Object.keys(sections).forEach(function (key) {
+      sections[key].hidden = key !== name;
+    });
+  }
+
+  function readToken() {
+    try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+  }
+
+  function storeToken(value) {
+    try { localStorage.setItem(TOKEN_KEY, value); } catch (e) { /* tryb prywatny: token zostaje w pamięci strony */ }
+  }
+
+  function clearToken() {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignoruj */ }
+  }
+
+  function post(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) {
+          var err = new Error(data.error || 'Błąd serwera (' + res.status + ').');
+          err.status = res.status;
+          throw err;
+        }
+        return data;
+      });
+    }, function () {
+      throw new Error('Brak połączenia z serwerem. Sprawdź, czy jesteś w tej samej sieci Wi-Fi.');
+    });
+  }
+
+  function showError(message) {
+    registerError.textContent = message;
+    registerError.hidden = false;
+  }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function rankingText(f) {
+    if (f.ranking !== 999) {
+      return 'miejsce ' + f.ranking + ' w klasyfikacji PZSzerm';
+    }
+    if (f.rankingSource === 'ambiguous') {
+      return '999 (w klasyfikacji jest kilka osób o tym nazwisku, organizator to sprawdzi)';
+    }
+    return '999 (nie znaleziono Cię w klasyfikacji PZSzerm)';
+  }
+
+  // ---------- mecze ----------
+
+  function byLabel(b) {
+    if (b.by === 'me') return 'Wpisałeś go Ty.';
+    if (b.by === 'opponent') return 'Wpisał go przeciwnik.';
+    if (b.by === 'organizer') return 'Wpisał go organizator.';
+    return '';
+  }
+
+  function boutCard(b, isNext) {
+    var card = el('div', 'bout-card' + (isNext ? ' next' : ''));
+    card.appendChild(el('div', 'where', b.pool + ' · tura ' + b.turn + ' · plansza ' + b.board));
+    var vs = el('div', 'vs');
+    vs.appendChild(document.createTextNode('Ty vs '));
+    var strong = el('strong', '', b.opponent.name);
+    vs.appendChild(strong);
+    if (b.opponent.club) vs.appendChild(document.createTextNode(' (' + b.opponent.club + ')'));
+    card.appendChild(vs);
+    if (b.referee) card.appendChild(el('div', 'line', 'Sędzia: ' + b.referee));
+    if (b.noRest && !b.hasResult) {
+      card.appendChild(el('div', 'line', 'Zalecana przerwa: walczysz zaraz po poprzedniej walce.'));
+    }
+
+    if (b.hasResult) {
+      var won = b.mine > b.theirs;
+      card.appendChild(el('div', 'result ' + (won ? 'win' : 'lose'),
+        'Wynik: ' + b.mine + ':' + b.theirs + (won ? ' (wygrana)' : ' (porażka)')));
+      var by = byLabel(b);
+      if (by) card.appendChild(el('div', 'line muted', by));
+    } else {
+      card.appendChild(el('div', 'line muted', 'Do rozegrania'));
+    }
+    if (b.disputed) {
+      card.appendChild(el('div', 'warn', 'Zgłoszono błąd w tym wyniku. Decyduje organizator.'));
+    }
+    if (b.closed) {
+      card.appendChild(el('div', 'line muted', 'Pula jest zamknięta. Wynik wpisuje organizator.'));
+    }
+
+    var message = el('div', 'error');
+    message.hidden = true;
+
+    if (b.canEnter) {
+      var scoreForm = el('form', 'score-form');
+      scoreForm.noValidate = true;
+      var mineLabel = el('label', '', 'Ty');
+      var mine = el('input');
+      mine.type = 'number';
+      mine.min = '0';
+      mine.max = '5';
+      mine.step = '1';
+      mine.inputMode = 'numeric';
+      mine.required = true;
+      if (b.hasResult) mine.value = String(b.mine);
+      mineLabel.appendChild(mine);
+      var theirsLabel = el('label', '', b.opponent.name.split(' ')[0]);
+      var theirs = el('input');
+      theirs.type = 'number';
+      theirs.min = '0';
+      theirs.max = '5';
+      theirs.step = '1';
+      theirs.inputMode = 'numeric';
+      theirs.required = true;
+      if (b.hasResult) theirs.value = String(b.theirs);
+      theirsLabel.appendChild(theirs);
+      var submit = el('button', '', b.hasResult ? 'Popraw wynik' : 'Zapisz wynik');
+      submit.type = 'submit';
+      scoreForm.appendChild(mineLabel);
+      scoreForm.appendChild(theirsLabel);
+      scoreForm.appendChild(submit);
+      scoreForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        message.hidden = true;
+        var m = mine.value.trim();
+        var t = theirs.value.trim();
+        if (m === '' || t === '') {
+          message.textContent = 'Wpisz oba wyniki.';
+          message.hidden = false;
+          return;
+        }
+        submit.disabled = true;
+        post('/api/bout/score', { token: token, id: b.id, mine: Number(m), theirs: Number(t) })
+          .then(function (view) { render(view, false); })
+          .catch(function (e) {
+            message.textContent = e.message;
+            message.hidden = false;
+            submit.disabled = false;
+          });
+      });
+      card.appendChild(scoreForm);
+    }
+
+    if (b.canDispute) {
+      var dispute = el('button', 'secondary', 'Zgłoś błąd w wyniku');
+      dispute.type = 'button';
+      dispute.addEventListener('click', function () {
+        dispute.disabled = true;
+        post('/api/bout/dispute', { token: token, id: b.id })
+          .then(function (view) { render(view, false); })
+          .catch(function (e) {
+            message.textContent = e.message;
+            message.hidden = false;
+            dispute.disabled = false;
+          });
+      });
+      card.appendChild(dispute);
+    }
+    card.appendChild(message);
+    return card;
+  }
+
+  function render(view, isNew) {
+    var f = view.fencer;
+    document.getElementById('p-name').textContent = f.firstName + ' ' + f.lastName;
+    document.getElementById('p-club').textContent = f.club || '—';
+    document.getElementById('p-ranking').textContent = rankingText(f);
+    document.getElementById('profile-new').hidden = !isNew;
+    var hasPool = !!view.pool;
+    document.getElementById('p-pool-label').hidden = !hasPool;
+    document.getElementById('p-pool').hidden = !hasPool;
+    if (hasPool) document.getElementById('p-pool').textContent = view.pool.name + (view.pool.closed ? ' (zamknięta)' : '');
+
+    var next = view.bouts.find(function (b) { return b.id === view.next; });
+    nextPanel.hidden = !next;
+    nextBox.textContent = '';
+    if (next) nextBox.appendChild(boutCard(next, true));
+
+    matchesPanel.hidden = view.bouts.length === 0;
+    matchesBox.textContent = '';
+    view.bouts.forEach(function (b) {
+      if (b.id !== view.next) matchesBox.appendChild(boutCard(b, false));
+    });
+    if (view.bouts.length === 1 && next) matchesPanel.hidden = true;
+    matchesPanel.querySelector('h2').textContent = next ? 'Pozostałe mecze' : 'Twoje mecze';
+
+    refereeingPanel.hidden = view.refereeing.length === 0;
+    refereeingBox.textContent = '';
+    view.refereeing.forEach(function (r) {
+      var item = el('div', 'ref-item' + (r.done ? ' done' : ''),
+        r.pool + ' · tura ' + r.turn + ' · plansza ' + r.board + ': ' + r.fighters[0] + ' — ' + r.fighters[1] +
+        (r.done ? ' (rozegrana)' : ''));
+      refereeingBox.appendChild(item);
+    });
+
+    if (view.bouts.length === 0 && view.refereeing.length === 0) {
+      waitingPanel.hidden = false;
+      waitingText.textContent = hasPool
+        ? 'Nie masz przydzielonych meczów.'
+        : 'Mecze pojawią się tutaj, gdy organizator utworzy pule. Ta strona odświeża się sama.';
+    } else if (!next && view.bouts.length > 0 && view.bouts.every(function (b) { return b.hasResult; })) {
+      waitingPanel.hidden = false;
+      waitingText.textContent = 'Wszystkie Twoje mecze w puli są rozegrane. Dziękujemy!';
+    } else {
+      waitingPanel.hidden = true;
+    }
+    lastView = JSON.stringify(view);
+    show('profile');
+  }
+
+  function showRegistration() {
+    return fetch('/api/registration').then(function (res) { return res.json(); }).then(function (data) {
+      show(data.open ? 'register' : 'closed');
+    }, function () {
+      show('closed');
+    });
+  }
+
+  // Odświeżanie: nowy wynik przeciwnika, kolejny mecz, zamknięta pula. Nie nadpisujemy formularza, w którym ktoś pisze.
+  function poll() {
+    if (!token || document.hidden || sections.profile.hidden) return;
+    var active = document.activeElement;
+    if (active && active.tagName === 'INPUT' && sections.profile.contains(active)) return;
+    post('/api/me', { token: token }).then(function (view) {
+      if (JSON.stringify(view) !== lastView) render(view, false);
+    }).catch(function () { /* chwilowy brak sieci: spróbujemy za chwilę */ });
+  }
+
+  function startPolling() {
+    if (!pollTimer) pollTimer = setInterval(poll, POLL_MS);
+  }
+
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    registerError.hidden = true;
+    if (!firstNameInput.value.trim() || !lastNameInput.value.trim()) {
+      showError('Podaj imię i nazwisko.');
+      return;
+    }
+    registerBtn.disabled = true;
+    post('/api/register', {
+      firstName: firstNameInput.value,
+      lastName: lastNameInput.value,
+      club: clubInput.value
+    }).then(function (data) {
+      token = data.token;
+      storeToken(token);
+      render(data, true);
+      startPolling();
+    }).catch(function (e) {
+      if (e.status === 409) {
+        showError(e.message + ' Jeśli to Ty, poproś organizatora o osobisty kod QR.');
+      } else if (e.status === 403) {
+        show('closed');
+      } else {
+        showError(e.message);
+      }
+    }).then(function () {
+      registerBtn.disabled = false;
+    });
+  });
+
+  function init() {
+    var params = new URLSearchParams(location.search);
+    var fromLink = params.get('t');
+    if (fromLink) {
+      storeToken(fromLink);
+      token = fromLink;
+      history.replaceState(null, '', location.pathname);
+    } else {
+      token = readToken();
+    }
+
+    if (!token) {
+      showRegistration();
+      return;
+    }
+    post('/api/me', { token: token }).then(function (view) {
+      render(view, false);
+      startPolling();
+    }).catch(function (e) {
+      if (e.status === 404) {
+        clearToken();
+        token = null;
+        showRegistration();
+      } else {
+        show('closed');
+        sections.closed.querySelector('h2').textContent = 'Nie udało się połączyć';
+        sections.closed.querySelector('p').textContent = e.message;
+      }
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
