@@ -161,24 +161,6 @@
   .pool h3 { font-size: 0.95rem; margin: 16px 0 8px; color: var(--muted); }
   .bout-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
   .frozen .pool input, .frozen .pool select, .frozen .pool button { pointer-events: none; opacity: 0.6; }
-  .de-scroll { overflow-x: auto; padding-bottom: 8px; }
-  .de-grid { position: relative; display: grid; column-gap: 44px; width: max-content; }
-  .de-head { font-weight: 700; font-size: 0.95rem; align-self: center; }
-  .de-slot { display: flex; align-items: center; min-width: 0; }
-  .de-bout { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); position: relative; z-index: 1; }
-  .de-bout .de-title { font-size: 0.72rem; color: var(--muted); padding: 3px 8px 0; }
-  .de-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 8px; }
-  .de-row + .de-row { border-top: 1px solid var(--border); }
-  .de-row .de-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .de-row .de-seed { color: var(--muted); font-size: 0.78rem; min-width: 1.9em; }
-  .de-row.win { font-weight: 700; background: var(--win-bg); }
-  .de-row.empty-slot .de-name { color: var(--muted); font-style: italic; font-weight: 400; }
-  .de-row input { width: 3.3em; padding: 3px 4px; text-align: center; }
-  .de-lines { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
-  .de-lines path { fill: none; stroke: var(--muted); stroke-width: 1.5; opacity: 0.55; }
-  .de-lines path.won { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
-  .de-lines marker path { fill: var(--muted); stroke: none; opacity: 0.8; }
-  .de-lines marker.won path { fill: var(--accent); opacity: 1; }
   .bout-item.edit-request { border-left: 3px solid var(--accent); padding-left: 8px; }
   .bout-item.disputed { background: var(--lose-bg); border-radius: 6px; padding: 6px 8px; }
   .bout { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -436,6 +418,25 @@
             <label>Liczba zawodników w drabince
               <input id="bracket-count" type="number" min="2" step="1">
             </label>
+            <label>albo procent zawodników (%)
+              <input id="bracket-percent" type="number" min="1" max="100" step="1">
+            </label>
+          </div>
+          <div class="muted" id="bracket-count-info"></div>
+          <label style="flex-direction: row; align-items: center; gap: 8px; margin-top: 8px;">
+            <input type="checkbox" id="bracket-repasaze" style="width: auto;">
+            Z repasażami (przegrani rundy grają o miejsca, np. 5–8, 9–16)
+          </label>
+          <div id="bracket-depth-box" hidden>
+            <label>Repasaże do miejsca
+              <select id="bracket-depth">
+                <option value="8">8 (miejsca 5–8)</option>
+                <option value="16" selected>16 (miejsca 5–16)</option>
+                <option value="32">32 (miejsca 5–32)</option>
+                <option value="64">64 (miejsca 5–64)</option>
+                <option value="1024">wszystkie możliwe</option>
+              </select>
+            </label>
           </div>
           <div class="actions">
             <button type="button" class="primary" id="bracket-btn">Utwórz drabinkę</button>
@@ -479,6 +480,7 @@
 </main>
 
 <script src="/static/qrcode.js"></script>
+<script src="/static/bracket.js"></script>
 <script>
 (function () {
   var PIN_KEY = 'admin.pin';
@@ -560,6 +562,11 @@
   var round2Btn = document.getElementById('round2-btn');
   var bracketCreateBox = document.getElementById('bracket-create-box');
   var bracketCountInput = document.getElementById('bracket-count');
+  var bracketPercentInput = document.getElementById('bracket-percent');
+  var bracketCountInfo = document.getElementById('bracket-count-info');
+  var bracketRepasaze = document.getElementById('bracket-repasaze');
+  var bracketDepthBox = document.getElementById('bracket-depth-box');
+  var bracketDepth = document.getElementById('bracket-depth');
   var bracketBtn = document.getElementById('bracket-btn');
   var bracketExists = document.getElementById('bracket-exists');
   var unapproveBtn = document.getElementById('unapprove-btn');
@@ -1827,10 +1834,13 @@
     if (document.activeElement !== round2SizeInput && round2SizeInput.value === '') {
       round2SizeInput.value = String(Math.max(2, Math.min(total, state.poolSize || 5)));
     }
-    if (document.activeElement !== bracketCountInput && bracketCountInput.value === '') {
+    if (document.activeElement !== bracketCountInput && document.activeElement !== bracketPercentInput &&
+        bracketCountInput.value === '') {
       var suggested = state.advanceCount === null ? Math.floor(total * 0.8) : state.advanceCount;
       bracketCountInput.value = String(Math.max(2, Math.min(total, suggested)));
+      bracketPercentInput.value = String(Math.round(Number(bracketCountInput.value) / Math.max(1, total) * 100));
     }
+    updateBracketCountInfo();
 
     roundsArchive.hidden = archivedRounds.length === 0;
     roundsArchiveRows.textContent = '';
@@ -1884,26 +1894,53 @@
       poolSizeTouched = false;
     });
   });
+  // Liczba i procent zawodników w drabince są ze sobą powiązane (procent liczony od wszystkich zawodników).
+  function bracketTableSize(count) {
+    var size = 2;
+    while (size < count) size *= 2;
+    return size;
+  }
+
+  function updateBracketCountInfo() {
+    var total = fencers.length;
+    var count = Number(bracketCountInput.value);
+    if (!Number.isInteger(count) || count < 2 || total < 2) {
+      bracketCountInfo.textContent = '';
+      return;
+    }
+    bracketCountInfo.textContent = 'W drabince: ' + count + ' z ' + total + ' zawodników (' +
+      Math.round(count / total * 100) + '%), tabela ' + bracketTableSize(count) + '.';
+  }
+
+  bracketRepasaze.addEventListener('change', function () { bracketDepthBox.hidden = !bracketRepasaze.checked; });
+
+  bracketCountInput.addEventListener('input', function () {
+    var total = fencers.length;
+    if (bracketCountInput.value !== '' && Number(bracketCountInput.value) > total) bracketCountInput.value = String(total);
+    var count = Number(bracketCountInput.value);
+    bracketPercentInput.value = bracketCountInput.value === '' || total < 1 ? '' : String(Math.round(count / total * 100));
+    updateBracketCountInfo();
+  });
+  bracketPercentInput.addEventListener('input', function () {
+    var total = fencers.length;
+    if (bracketPercentInput.value === '') return;
+    var percent = Math.max(1, Math.min(100, Number(bracketPercentInput.value)));
+    if (bracketPercentInput.value !== '' && Number(bracketPercentInput.value) > 100) bracketPercentInput.value = '100';
+    bracketCountInput.value = String(Math.max(2, Math.min(total, Math.round(total * percent / 100))));
+    updateBracketCountInfo();
+  });
+
   bracketBtn.addEventListener('click', function () {
     var count = Number(bracketCountInput.value);
-    approvalAction(bracketBtn, '/api/admin/bracket', { count: count }, function () { showView('bracket'); });
+    var body = { count: count };
+    if (bracketRepasaze.checked) {
+      body.repasaze = true;
+      body.depth = Number(bracketDepth.value);
+    }
+    approvalAction(bracketBtn, '/api/admin/bracket', body, function () { showView('bracket'); });
   });
 
   // ---------- drabinka ----------
-
-  function deRoundTitle(round, index) {
-    var inRound = bracket.size / Math.pow(2, index);
-    if (index === 0 && bracket.count < bracket.size) return 'Dobijaki (tabela ' + bracket.size + ')';
-    if (inRound === 2) return 'Finał';
-    if (inRound === 4) return 'Półfinały';
-    if (inRound === 8) return 'Ćwierćfinały';
-    return 'Tabela ' + inRound;
-  }
-
-  function seedOf(id) {
-    var i = bracket.seeds.indexOf(id);
-    return i === -1 ? '' : '#' + (i + 1);
-  }
 
   function parseDeScore(value) {
     var text = value.trim();
@@ -1936,109 +1973,22 @@
     await loadState();
   }
 
-  var DE_ROW_PX = 96;
-  var DE_COL_PX = 212;
-
-  // Karta jednej walki; number to numer walki w drabince, hints to opisy pustych miejsc.
-  function buildDeBout(b, title, hints) {
-    var card = document.createElement('div');
-    card.className = 'de-bout';
-    var head = document.createElement('div');
-    head.className = 'de-title';
-    head.textContent = title;
-    card.appendChild(head);
-    var inputs = [];
-    var rows = {};
-    ['a', 'b'].forEach(function (side) {
-      var id = b[side];
-      var row = document.createElement('div');
-      row.className = 'de-row' + (b.winner && b.winner === id ? ' win' : '') + (!id ? ' empty-slot' : '');
-      var seed = document.createElement('span');
-      seed.className = 'de-seed';
-      seed.textContent = id ? seedOf(id) : '';
-      var name = document.createElement('span');
-      name.className = 'de-name';
-      name.textContent = id ? fencerLabel(fencerById(id)) : (b.bye ? 'wolny los' : (hints[side] || '—'));
-      if (id) name.title = fencerLabel(fencerById(id));
-      row.appendChild(seed);
-      row.appendChild(name);
-      if (!b.bye) {
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.max = String(DE_THRESHOLD);
-        input.step = '1';
-        input.disabled = !(b.a && b.b);
-        var score = side === 'a' ? b.sa : b.sb;
-        input.value = score === null ? '' : String(score);
-        input.setAttribute('aria-label', 'Trafienia: ' + (id ? fencerLabel(fencerById(id)) : ''));
-        inputs.push(input);
-        row.appendChild(input);
-      }
-      card.appendChild(row);
-      rows[side] = row;
-    });
-    if (inputs.length === 2) {
-      inputs.forEach(function (input) {
-        input.addEventListener('change', function () { onDeScore(b.id, inputs[0], inputs[1]); });
-      });
+  async function onDeReferee(boutId, value) {
+    bracketError.classList.remove('show');
+    try {
+      await api('POST', '/api/admin/bracket/bout/referee', { id: boutId, referee: value === '' ? null : value });
+    } catch (e) {
+      bracketError.textContent = e.message;
+      bracketError.classList.add('show');
     }
-    card._rows = rows;
-    return card;
-  }
-
-  // Linie ze strzałkami: z prawej strony walki do miejsca (górny/dolny wiersz) w walce następnej rundy.
-  function drawBracketLines(grid, cards) {
-    var NS = 'http://www.w3.org/2000/svg';
-    var svg = document.createElementNS(NS, 'svg');
-    svg.setAttribute('class', 'de-lines');
-    svg.setAttribute('width', String(grid.scrollWidth));
-    svg.setAttribute('height', String(grid.scrollHeight));
-    var defs = document.createElementNS(NS, 'defs');
-    ['', 'won'].forEach(function (kind) {
-      var marker = document.createElementNS(NS, 'marker');
-      marker.setAttribute('id', 'de-arrow' + kind);
-      marker.setAttribute('class', kind);
-      marker.setAttribute('viewBox', '0 0 10 10');
-      marker.setAttribute('refX', '9');
-      marker.setAttribute('refY', '5');
-      marker.setAttribute('markerWidth', '7');
-      marker.setAttribute('markerHeight', '7');
-      marker.setAttribute('orient', 'auto');
-      var tip = document.createElementNS(NS, 'path');
-      tip.setAttribute('d', 'M0,0 L10,5 L0,10 z');
-      marker.appendChild(tip);
-      defs.appendChild(marker);
-    });
-    svg.appendChild(defs);
-
-    var box = grid.getBoundingClientRect();
-    function rel(el) {
-      var r = el.getBoundingClientRect();
-      return { left: r.left - box.left, right: r.right - box.left, mid: r.top - box.top + r.height / 2 };
-    }
-    for (var r = 0; r < cards.length - 1; r++) {
-      cards[r].forEach(function (card, i) {
-        var target = cards[r + 1][i >> 1];
-        var from = rel(card);
-        var to = rel(target._rows[i % 2 === 0 ? 'a' : 'b']);
-        var mid = from.right + (to.left - from.right) / 2;
-        var path = document.createElementNS(NS, 'path');
-        var won = !!card._winner;
-        path.setAttribute('d', 'M' + from.right + ',' + from.mid + ' H' + mid + ' V' + to.mid + ' H' + (to.left - 1));
-        path.setAttribute('marker-end', 'url(#de-arrow' + (won ? 'won' : '') + ')');
-        if (won) path.setAttribute('class', 'won');
-        svg.appendChild(path);
-      });
-    }
-    grid.appendChild(svg);
+    await loadState();
   }
 
   function renderBracket() {
-    bracketBox.textContent = '';
     bracketError.classList.remove('show');
     bracketActions.hidden = !bracket;
     if (!bracket) {
+      bracketBox.textContent = '';
       bracketInfo.textContent = '';
       var empty = document.createElement('div');
       empty.className = 'empty';
@@ -2046,73 +1996,22 @@
       bracketBox.appendChild(empty);
       return;
     }
-    var rounds = bracket.rounds;
-    var final = rounds[rounds.length - 1][0];
-    var info = 'Drabinka: ' + bracket.count + ' zawodników, tabela ' + bracket.size + '.';
+    var final = bracket.rounds[bracket.rounds.length - 1][0];
+    var info = 'Drabinka: ' + bracket.count + ' zawodników, tabela ' + bracket.size + '.' +
+      ((bracket.repasaze || []).length ? ' Z repasażami.' : '');
     if (final.winner) info += ' Zwycięzca: ' + fencerLabel(fencerById(final.winner)) + '.';
     bracketInfo.textContent = info;
-
-    // numery walk (bez wolnych losów)
-    var numbers = [];
-    var n = 0;
-    rounds.forEach(function (round) {
-      numbers.push(round.map(function (b) { return b.bye ? null : ++n; }));
-    });
-    var thirdNumber = bracket.third ? ++n : null;
-
-    var base = rounds[0].length;
-    var extra = bracket.third ? 1 : 0;
-    var scroll = document.createElement('div');
-    scroll.className = 'de-scroll';
-    var grid = document.createElement('div');
-    grid.className = 'de-grid';
-    grid.style.gridTemplateColumns = 'repeat(' + rounds.length + ', ' + DE_COL_PX + 'px)';
-    grid.style.gridTemplateRows = '32px repeat(' + (base + extra) + ', ' + DE_ROW_PX + 'px)';
-
-    var cards = [];
-    rounds.forEach(function (round, r) {
-      var head = document.createElement('div');
-      head.className = 'de-head';
-      head.style.gridColumn = String(r + 1);
-      head.style.gridRow = '1';
-      head.textContent = deRoundTitle(round, r);
-      grid.appendChild(head);
-
-      var span = Math.pow(2, r);
-      cards.push(round.map(function (b, i) {
-        var hints = {};
-        if (r > 0) {
-          ['a', 'b'].forEach(function (side, k) {
-            var feeder = numbers[r - 1][2 * i + k];
-            if (feeder) hints[side] = 'Zwycięzca walki ' + feeder;
-          });
-        }
-        var slot = document.createElement('div');
-        slot.className = 'de-slot';
-        slot.style.gridColumn = String(r + 1);
-        slot.style.gridRow = (2 + i * span) + ' / span ' + span;
-        var card = buildDeBout(b, numbers[r][i] ? 'Walka ' + numbers[r][i] : '', hints);
-        card._winner = !!b.winner;
-        slot.appendChild(card);
-        grid.appendChild(slot);
-        return card;
-      }));
-    });
-    if (bracket.third) {
-      var semis = numbers[rounds.length - 2];
-      var slot3 = document.createElement('div');
-      slot3.className = 'de-slot';
-      slot3.style.gridColumn = String(rounds.length);
-      slot3.style.gridRow = String(2 + base);
-      slot3.appendChild(buildDeBout(bracket.third, 'Walka o 3. miejsce (walka ' + thirdNumber + ')', {
-        a: 'Przegrany walki ' + semis[0], b: 'Przegrany walki ' + semis[1]
-      }));
-      grid.appendChild(slot3);
-    }
-    scroll.appendChild(grid);
-    bracketBox.appendChild(scroll);
-    requestAnimationFrame(function () {
-      if (grid.isConnected && !viewBracket.hidden) drawBracketLines(grid, cards);
+    window.BracketView.render(bracketBox, bracket, {
+      editable: true,
+      threshold: DE_THRESHOLD,
+      name: function (id) { return fencerLabel(fencerById(id)); },
+      onScore: onDeScore,
+      onReferee: onDeReferee,
+      refereeOptions: function (b) {
+        return fencers.filter(function (f) { return f.id !== b.a && f.id !== b.b; })
+          .sort(function (x, y) { return fencerLabel(x).localeCompare(fencerLabel(y), 'pl'); })
+          .map(function (f) { return { id: f.id, label: fencerLabel(f) }; });
+      }
     });
   }
 

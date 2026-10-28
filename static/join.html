@@ -63,6 +63,19 @@
     color: var(--text);
   }
   main { max-width: 460px; margin: 0 auto; }
+  /* telefon obrócony poziomo (albo szeroki ekran): szerszy układ, dwie kolumny kart w zakładce Mecze */
+  @media (min-width: 640px) {
+    main { max-width: 1000px; }
+    #tab-matches { column-count: 2; column-gap: 16px; }
+    #tab-matches .panel { break-inside: avoid; }
+    #tab-bracket .panel { max-width: 100%; }
+  }
+  @media (orientation: landscape) and (max-height: 520px) {
+    body { padding: 8px 12px; }
+    h1 { margin: 4px 0 8px; font-size: 1.15rem; }
+    .panel { padding: 12px; margin-bottom: 10px; }
+    .tabs { margin-bottom: 10px; }
+  }
   h1 { font-size: 1.4rem; margin: 8px 0 16px; }
   .panel {
     background: var(--panel);
@@ -132,6 +145,13 @@
   .ref-item { font-size: 0.95rem; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .ref-item:last-child { border-bottom: 0; }
   .ref-item.done { color: var(--muted); }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 2px; }
+  .tabs .tab { width: auto; flex: 1 0 auto; padding: 10px 12px; background: transparent; color: var(--accent); font-size: 0.95rem; white-space: nowrap; }
+  .tabs .tab.active { background: var(--accent); color: #fff; }
+  #groups-box details { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 10px; padding: 0 10px; }
+  #groups-box summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+  #groups-box .table-wrap { padding-bottom: 10px; }
+  table.grid td.diag, table.grid td.win, table.grid td.lose { min-width: 2.2em; }
   .table-wrap { overflow-x: auto; margin: 0 -4px; }
   table.grid { border-collapse: collapse; width: 100%; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
   table.grid th, table.grid td { padding: 6px 6px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
@@ -175,6 +195,14 @@
   </section>
 
   <div id="profile" hidden>
+    <nav class="tabs" id="tabs" hidden></nav>
+
+    <div id="tab-matches">
+    <section class="panel" id="results-panel" hidden>
+      <h2 id="results-title">Wyniki Twojej grupy</h2>
+      <p class="muted">Sprawdź swoje wyniki. Jeśli coś się nie zgadza, zgłoś to organizatorowi.</p>
+      <div class="table-wrap"><table class="grid" id="results-table"></table></div>
+    </section>
     <section class="panel">
       <h2 id="profile-title">Jesteś zapisany</h2>
       <div class="ok" id="profile-new" hidden>Zapis przyjęty.</div>
@@ -186,41 +214,68 @@
       </dl>
       <p class="muted">Ten telefon jest Twoim kluczem do zapisu. Nie czyść danych przeglądarki. Jeśli stracisz dostęp, poproś organizatora o osobisty kod QR.</p>
     </section>
-
     <section class="panel" id="next-panel" hidden>
       <h2>Twój następny mecz</h2>
       <div id="next-box"></div>
     </section>
-
     <section class="panel" id="matches-panel" hidden>
       <h2>Twoje mecze</h2>
       <div id="matches"></div>
     </section>
-
-    <section class="panel" id="results-panel" hidden>
-      <h2 id="results-title">Wyniki Twojej grupy</h2>
-      <p class="muted">Sprawdź swoje wyniki. Jeśli coś się nie zgadza, zgłoś to organizatorowi.</p>
-      <div class="table-wrap"><table class="grid" id="results-table"></table></div>
-      <div class="results-actions">
-        <button type="button" class="secondary" id="ranking-btn">Pokaż ranking wszystkich grup</button>
-      </div>
-      <div id="ranking-box" hidden>
-        <p class="muted" id="ranking-note"></p>
-        <div class="table-wrap"><table class="grid" id="ranking-table"></table></div>
-      </div>
-    </section>
-
     <section class="panel" id="refereeing-panel" hidden>
       <h2>Sędziujesz</h2>
       <div id="refereeing"></div>
     </section>
-
     <section class="panel" id="waiting-panel" hidden>
       <p class="muted" id="waiting-text"></p>
     </section>
+    </div>
+
+    <div id="tab-prevgroup" hidden>
+      <section class="panel" id="prev-results-panel" hidden>
+        <h2 id="prev-results-title">Wyniki Twojej grupy</h2>
+        <p class="muted">Wyniki poprzedniej tury grup.</p>
+        <div class="table-wrap"><table class="grid" id="prev-results-table"></table></div>
+      </section>
+      <section class="panel" id="prev-empty" hidden>
+        <p class="muted">Nie brałeś udziału w tej turze grup.</p>
+      </section>
+    </div>
+
+    <div id="tab-ranking" hidden>
+      <section class="panel">
+        <h2 id="ranking-title">Ranking wszystkich grup</h2>
+        <p class="muted" id="ranking-note"></p>
+        <div class="table-wrap"><table class="grid" id="ranking-table"></table></div>
+      </section>
+    </div>
+
+    <div id="tab-groups" hidden>
+      <section class="panel">
+        <h2 id="groups-title">Wszystkie grupy</h2>
+        <p class="muted">Podgląd składów i wyników wszystkich grup (odświeża się na żywo). Twoja grupa jest rozwinięta.</p>
+        <div id="groups-box"></div>
+      </section>
+    </div>
+
+    <div id="tab-bracket" hidden>
+      <section class="panel" id="de-panel">
+        <h2>Twoja następna walka w drabince</h2>
+        <div id="de-box"></div>
+      </section>
+      <section class="panel" id="de-refereeing-panel" hidden>
+        <h2>Sędziujesz w drabince</h2>
+        <div id="de-refereeing"></div>
+      </section>
+      <section class="panel">
+        <h2>Drabinka direct elimination</h2>
+        <div id="bracket-view"></div>
+      </section>
+    </div>
   </div>
 </main>
 
+<script src="/static/bracket.js"></script>
 <script>
 (function () {
   var TOKEN_KEY = 'fencing.token';
@@ -249,11 +304,32 @@
   var resultsPanel = document.getElementById('results-panel');
   var resultsTitle = document.getElementById('results-title');
   var resultsTable = document.getElementById('results-table');
-  var rankingBtn = document.getElementById('ranking-btn');
-  var rankingBox = document.getElementById('ranking-box');
+  var prevResultsPanel = document.getElementById('prev-results-panel');
+  var prevResultsTitle = document.getElementById('prev-results-title');
+  var prevResultsTable = document.getElementById('prev-results-table');
+  var prevEmpty = document.getElementById('prev-empty');
+  var rankingTitle = document.getElementById('ranking-title');
   var rankingNote = document.getElementById('ranking-note');
   var rankingTable = document.getElementById('ranking-table');
-  var rankingOpen = false;
+  var groupsTitle = document.getElementById('groups-title');
+  var tabsNav = document.getElementById('tabs');
+  var panes = {
+    matches: document.getElementById('tab-matches'),
+    prevgroup: document.getElementById('tab-prevgroup'),
+    groups: document.getElementById('tab-groups'),
+    ranking: document.getElementById('tab-ranking'),
+    bracket: document.getElementById('tab-bracket')
+  };
+  var groupsBox = document.getElementById('groups-box');
+  var tabs = [];
+  var loadedKey = {};
+  var openGroups = {};
+  var deBox = document.getElementById('de-box');
+  var deRefPanel = document.getElementById('de-refereeing-panel');
+  var deRefBox = document.getElementById('de-refereeing');
+  var bracketViewBox = document.getElementById('bracket-view');
+  var currentTab = null;
+  var lastBracketView = null;
   var refereeingPanel = document.getElementById('refereeing-panel');
   var refereeingBox = document.getElementById('refereeing');
   var waitingPanel = document.getElementById('waiting-panel');
@@ -463,20 +539,15 @@
     return tr;
   }
 
-  function renderPoolResults(results) {
-    resultsPanel.hidden = !results;
-    resultsTable.textContent = '';
-    if (!results) {
-      rankingOpen = false;
-      rankingBox.hidden = true;
-      rankingBtn.textContent = 'Pokaż ranking wszystkich grup';
-      return;
-    }
-    resultsTitle.textContent = 'Wyniki Twojej grupy (' + results.pool + ')';
+  function fillResults(panel, titleEl, table, results) {
+    panel.hidden = !results;
+    table.textContent = '';
+    if (!results) return;
+    titleEl.textContent = 'Wyniki Twojej grupy (' + results.pool + ')';
     var head = [{ text: '#', th: true }, { text: 'Zawodnik', th: true, cls: 'name' }];
     results.rows.forEach(function (_, j) { head.push({ text: String(j + 1), th: true }); });
     ['V', 'V/M', 'TS', 'TR', 'Ind', 'Msc'].forEach(function (h) { head.push({ text: h, th: true }); });
-    row(resultsTable, head);
+    row(table, head);
     results.rows.forEach(function (r, i) {
       var cells = [{ text: String(i + 1) }, { text: r.name, cls: 'name' }];
       r.cells.forEach(function (c) {
@@ -484,40 +555,246 @@
       });
       cells.push({ text: String(r.V) }, { text: r.VM }, { text: String(r.TS) }, { text: String(r.TR) },
         { text: (r.Ind > 0 ? '+' : '') + r.Ind }, { text: r.place });
-      var tr = row(resultsTable, cells);
+      var tr = row(table, cells);
       if (r.me) tr.className = 'me';
     });
-    if (rankingOpen) loadRanking();
   }
 
-  function loadRanking() {
-    return post('/api/me/ranking', { token: token }).then(function (data) {
+  // ---------- zakładki ----------
+
+  // Lista zakładek zależy od stanu turnieju. Po utworzeniu drugiej tury zakładki pierwszej tury zostają
+  // (bez numeru), a druga tura dostaje własne: Grupa 2, Wszystkie grupy 2, Ranking 2.
+  function buildTabs(view) {
+    var list = [];
+    var many = view.groupsCount > 0;
+    function add(id, label, pane, round, visible) {
+      if (visible) list.push({ id: id, label: label, pane: pane, round: round });
+    }
+    if (view.prev) {
+      var n = view.round;
+      add('g1', 'Grupa', 'prevgroup', view.prev.round, true);
+      add('all1', 'Wszystkie grupy', 'groups', view.prev.round, view.prev.groupsCount > 0);
+      add('rank1', 'Ranking', 'ranking', view.prev.round, view.prev.groupsCount > 0);
+      add('g2', 'Grupa ' + n, 'matches', null, true);
+      add('all2', 'Wszystkie grupy ' + n, 'groups', n, many);
+      add('rank2', 'Ranking ' + n, 'ranking', n, many);
+    } else {
+      add('g1', 'Grupa', 'matches', null, true);
+      add('all1', 'Wszystkie grupy', 'groups', null, many);
+      add('rank1', 'Ranking', 'ranking', null, many);
+    }
+    add('bracket', 'Drabinka', 'bracket', null, !!view.bracket);
+    return list;
+  }
+
+  function currentTabObject() {
+    return tabs.find(function (t) { return t.id === currentTab; }) || null;
+  }
+
+  function renderTabs() {
+    tabsNav.textContent = '';
+    tabs.forEach(function (t) {
+      var b = el('button', 'tab' + (t.id === currentTab ? ' active' : ''), t.label);
+      b.type = 'button';
+      b.addEventListener('click', function () { showTab(t.id); });
+      tabsNav.appendChild(b);
+    });
+    tabsNav.hidden = tabs.length < 2;
+  }
+
+  function showTab(id) {
+    var tab = tabs.find(function (t) { return t.id === id; }) || tabs[0];
+    if (!tab) return;
+    currentTab = tab.id;
+    Object.keys(panes).forEach(function (key) { panes[key].hidden = key !== tab.pane; });
+    renderTabs();
+    refreshTab();
+    if (tab.pane === 'bracket') renderBracketTab();   // linie wymagają widocznej drabinki
+  }
+
+  // dane zakładek ładowanych z serwera (Wszystkie grupy, Ranking); wołane też przy odświeżaniu strony
+  function refreshTab() {
+    var tab = currentTabObject();
+    if (!tab) return;
+    if (tab.pane === 'groups') loadGroups(tab);
+    if (tab.pane === 'ranking') loadRanking(tab);
+  }
+
+  function roundSuffix(tab) {
+    return tab.round && tabs.some(function (t) { return t.pane === 'prevgroup'; }) ? ' (tura ' + tab.round + ')' : '';
+  }
+
+  function loadRanking(tab) {
+    return post('/api/me/ranking', { token: token, round: tab.round }).then(function (data) {
+      var key = tab.id + JSON.stringify(data);
+      if (loadedKey.ranking === key) return;
+      loadedKey.ranking = key;
+      rankingTitle.textContent = 'Ranking wszystkich grup' + roundSuffix(tab);
       rankingTable.textContent = '';
-      row(rankingTable, ['Msc', 'Zawodnik', 'Klub', 'Grupa', 'V', 'M', 'V/M', 'TS', 'TR', 'Ind', 'Awans'].map(function (h, i) {
+      var heads = ['Msc', 'Zawodnik', 'Klub', 'Grupa', 'V', 'M', 'V/M', 'TS', 'TR', 'Ind'];
+      if (!data.archived) heads.push('Awans');
+      row(rankingTable, heads.map(function (h, i) {
         return { text: h, th: true, cls: (i === 1 || i === 2) ? 'name' : '' };
       }));
       data.rows.forEach(function (r) {
-        var tr = row(rankingTable, [
+        var cells = [
           { text: r.place }, { text: r.name, cls: 'name' }, { text: r.club || '—', cls: 'name' }, { text: r.pool },
           { text: String(r.V) }, { text: String(r.M) }, { text: r.VM }, { text: String(r.TS) }, { text: String(r.TR) },
-          { text: (r.Ind > 0 ? '+' : '') + r.Ind }, { text: r.advance ? 'Awans' : '' }
-        ]);
+          { text: (r.Ind > 0 ? '+' : '') + r.Ind }
+        ];
+        if (!data.archived) cells.push({ text: r.advance ? 'Awans' : '' });
+        var tr = row(rankingTable, cells);
         if (r.me) tr.className = 'me';
       });
-      rankingNote.textContent = data.complete
-        ? 'Wszystkie grupy zakończone. Awansuje ' + data.advanceCount + ' zawodników.'
-        : 'Nie wszystkie grupy są jeszcze zakończone, ranking może się zmienić. Status awansu pojawi się po zakończeniu wszystkich grup.';
+      if (data.archived) {
+        rankingNote.textContent = 'Ranking po turze ' + data.round + '.';
+      } else {
+        rankingNote.textContent = data.complete
+          ? 'Wszystkie grupy zakończone. Awansuje ' + data.advanceCount + ' zawodników.'
+          : 'Nie wszystkie grupy są jeszcze zakończone, ranking może się zmienić. Status awansu pojawi się po zakończeniu wszystkich grup.';
+      }
     }).catch(function (e) {
+      loadedKey.ranking = '';
+      rankingTitle.textContent = 'Ranking wszystkich grup' + roundSuffix(tab);
+      rankingTable.textContent = '';
       rankingNote.textContent = e.message;
     });
   }
 
-  rankingBtn.addEventListener('click', function () {
-    rankingOpen = !rankingOpen;
-    rankingBox.hidden = !rankingOpen;
-    rankingBtn.textContent = rankingOpen ? 'Ukryj ranking wszystkich grup' : 'Pokaż ranking wszystkich grup';
-    if (rankingOpen) loadRanking();
-  });
+  function renderBracketTab() {
+    if (!lastBracketView) return;
+    var view = lastBracketView;
+    window.BracketView.render(bracketViewBox, view.bracket, {
+      editable: false,
+      fit: true,
+      me: view.fencer.id,
+      highlight: view.de && view.de.next ? view.de.next.id : null,
+      name: function (id) { return view.bracket.names[id] || '?'; }
+    });
+  }
+
+  // ---------- zakładka Wszystkie grupy ----------
+
+  function renderGroups(data) {
+    groupsBox.textContent = '';
+    data.groups.forEach(function (g) {
+      var key = data.round + ':' + g.name;
+      var details = document.createElement('details');
+      details.setAttribute('data-name', g.name);
+      details.open = openGroups[key] !== undefined ? openGroups[key] : g.mine;
+      details.addEventListener('toggle', function () { openGroups[key] = details.open; });
+      var summary = document.createElement('summary');
+      summary.textContent = g.name + ' · ' + g.rows.length + ' zawodników' + (g.mine ? ' · Twoja grupa' : '') + (g.complete ? ' · zakończona' : '');
+      details.appendChild(summary);
+      var wrap = el('div', 'table-wrap');
+      var table = el('table', 'grid');
+      var head = [{ text: '#', th: true }, { text: 'Zawodnik', th: true, cls: 'name' }];
+      g.rows.forEach(function (_, j) { head.push({ text: String(j + 1), th: true }); });
+      ['V', 'V/M', 'TS', 'TR', 'Ind', 'Msc'].forEach(function (h) { head.push({ text: h, th: true }); });
+      row(table, head);
+      g.rows.forEach(function (r, i) {
+        var cells = [{ text: String(i + 1) }, { text: r.name, cls: 'name' }];
+        r.cells.forEach(function (c) {
+          cells.push(c === null ? { text: '', cls: 'diag' } : { text: c.text, cls: c.win === null ? '' : (c.win ? 'win' : 'lose') });
+        });
+        cells.push({ text: String(r.V) }, { text: r.VM }, { text: String(r.TS) }, { text: String(r.TR) },
+          { text: (r.Ind > 0 ? '+' : '') + r.Ind }, { text: r.place });
+        var tr = row(table, cells);
+        if (r.me) tr.className = 'me';
+      });
+      wrap.appendChild(table);
+      details.appendChild(wrap);
+      groupsBox.appendChild(details);
+    });
+  }
+
+  function loadGroups(tab) {
+    return post('/api/me/groups', { token: token, round: tab.round }).then(function (data) {
+      var key = tab.id + JSON.stringify(data);
+      if (loadedKey.groups === key) return;
+      loadedKey.groups = key;
+      groupsTitle.textContent = 'Wszystkie grupy' + roundSuffix(tab);
+      renderGroups(data);
+    }).catch(function (e) {
+      loadedKey.groups = '';
+      groupsBox.textContent = e.message;
+    });
+  }
+
+  // Obrót telefonu: przelicz skalę drabinki tylko, gdy zmieniła się SZEROKOŚĆ.
+  // Samo przewijanie na telefonie zmienia wysokość okna (chowa się pasek adresu) i wywołuje 'resize',
+  // więc zdarzeń bez zmiany szerokości nie wolno traktować jako obrotu.
+  var resizeTimer = null;
+  var lastWidth = window.innerWidth;
+  function onViewportChange() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      var width = window.innerWidth;
+      if (width === lastWidth) return;
+      lastWidth = width;
+      var tab = currentTabObject();
+      if (lastBracketView && tab && tab.pane === 'bracket') window.BracketView.refresh(bracketViewBox);
+    }, 250);
+  }
+  window.addEventListener('resize', onViewportChange);
+  window.addEventListener('orientationchange', onViewportChange);
+
+  function renderDe(view) {
+    var hasBracket = !!view.bracket;
+    var firstBracket = hasBracket && !lastBracketView;
+    lastBracketView = hasBracket ? view : null;
+
+    deBox.textContent = '';
+    deRefBox.textContent = '';
+    deRefPanel.hidden = true;
+    if (hasBracket) {
+      var de = view.de;
+      var next = de.next;
+      if ((de.state === 'ready' || de.state === 'waiting') && next) {
+        var card = el('div', 'bout-card next');
+        card.appendChild(el('div', 'where', next.round + ' · walka ' + next.number));
+        if (next.opponent) {
+          var vs = el('div', 'vs');
+          vs.appendChild(document.createTextNode('Ty vs '));
+          vs.appendChild(el('strong', '', next.opponent));
+          card.appendChild(vs);
+        } else {
+          card.appendChild(el('div', 'vs', 'Czekasz na przeciwnika.'));
+          if (next.waitingFor) card.appendChild(el('div', 'line muted', 'Przeciwnik wyjdzie ze zwycięzcy walki ' + next.waitingFor + '.'));
+        }
+        card.appendChild(el('div', 'line', next.referee ? 'Sędzia: ' + next.referee : 'Sędzia: do ustalenia'));
+        card.appendChild(el('div', 'line muted', 'Wynik wpisuje organizator.'));
+        var find = el('button', 'secondary', 'Znajdź w drabince');
+        find.type = 'button';
+        find.addEventListener('click', function () { window.BracketView.focus(bracketViewBox, next.id); });
+        card.appendChild(find);
+        deBox.appendChild(card);
+      } else if (de.state === 'winner') {
+        deBox.appendChild(el('div', 'ok', 'Wygrałeś turniej! Gratulacje!'));
+      } else if (de.state === 'out') {
+        deBox.appendChild(el('div', 'line', 'Odpadłeś z drabinki. Dziękujemy za udział!'));
+      } else {
+        deBox.appendChild(el('div', 'line muted', 'Nie ma Cię w drabince.'));
+      }
+      if (de.refereeing.length) {
+        deRefPanel.hidden = false;
+        de.refereeing.forEach(function (r) {
+          deRefBox.appendChild(el('div', 'ref-item', 'Walka ' + r.number + ' (' + r.round + '): ' + r.a + ' — ' + r.b));
+        });
+      }
+    }
+
+    // poprzednia tura grup (po utworzeniu drugiej): szachownica własnej grupy
+    var prev = view.prev;
+    fillResults(prevResultsPanel, prevResultsTitle, prevResultsTable, prev ? prev.poolResults : null);
+    prevEmpty.hidden = !prev || !!prev.poolResults;
+
+    tabs = buildTabs(view);
+    var mainGroupTab = view.prev ? 'g2' : 'g1';
+    if (!tabs.some(function (t) { return t.id === currentTab; })) currentTab = hasBracket ? 'bracket' : mainGroupTab;
+    if (firstBracket && currentTab === mainGroupTab) currentTab = 'bracket';
+    showTab(currentTab);
+  }
 
   function render(view, isNew) {
     var f = view.fencer;
@@ -543,7 +820,7 @@
     if (view.bouts.length === 1 && next) matchesPanel.hidden = true;
     matchesPanel.querySelector('h2').textContent = next ? 'Pozostałe mecze' : 'Twoje mecze';
 
-    renderPoolResults(view.poolResults);
+    fillResults(resultsPanel, resultsTitle, resultsTable, view.poolResults);
 
     refereeingPanel.hidden = view.refereeing.length === 0;
     refereeingBox.textContent = '';
@@ -565,6 +842,7 @@
     } else {
       waitingPanel.hidden = true;
     }
+    renderDe(view);
     lastView = JSON.stringify(view);
     show('profile');
   }
@@ -582,6 +860,7 @@
     if (!token || document.hidden || sections.profile.hidden) return;
     var active = document.activeElement;
     if (active && active.tagName === 'INPUT' && sections.profile.contains(active)) return;
+    refreshTab();
     post('/api/me', { token: token }).then(function (view) {
       if (JSON.stringify(view) !== lastView) render(view, false);
     }).catch(function () { /* chwilowy brak sieci: spróbujemy za chwilę */ });

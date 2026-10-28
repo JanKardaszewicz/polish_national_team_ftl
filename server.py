@@ -49,6 +49,7 @@ STATIC_FILES = {
     '/join': ('join.html', 'text/html; charset=utf-8'),
     '/static/qrcode.js': ('qrcode.js', 'application/javascript; charset=utf-8'),
     '/static/i18n.js': ('i18n.js', 'application/javascript; charset=utf-8'),
+    '/static/bracket.js': ('bracket.js', 'application/javascript; charset=utf-8'),
 }
 
 
@@ -212,11 +213,18 @@ def rank_stats(rows):
 
 
 def bracket_order(size):
-    """Kolejność rozstawienia w drabince o rozmiarze size (potęga 2): [1, 8, 4, 5, 2, 7, 3, 6] dla 8."""
+    """Kolejność rozstawienia od góry do dołu tabeli (jak FIE): #1 na samej górze, #2 na samym dole.
+
+    Dla 8: [1, 8, 5, 4, 3, 6, 7, 2], czyli pary 1-8, 4-5, 3-6, 2-7. Dla 16: 1-16, 8-9, 5-12, 4-13, 3-14, 6-11, 7-10, 2-15.
+    """
     order = [1, 2]
     while len(order) < size:
-        n = len(order) * 2
-        order = [x for seed in order for x in (seed, n + 1 - seed)]
+        total = len(order) * 2 + 1
+        nxt = []
+        for i, seed in enumerate(order):
+            pair = [seed, total - seed]
+            nxt.extend(pair if i % 2 == 0 else pair[::-1])
+        order = nxt
     return order[:size]
 
 
@@ -269,6 +277,13 @@ class Store:
     def _upgrade(data):
         """Uzupełnia pola, których nie było w starszych plikach danych."""
         data['pools'].setdefault('approved', False)
+        bracket = data.get('bracket')
+        if bracket:
+            bracket.setdefault('repasaze', [])
+            bracket.setdefault('repasazeDepth', 0)
+            for b in [b for rnd in bracket['rounds'] for b in rnd] + ([bracket['third']] if bracket.get('third') else []):
+                b.setdefault('ref', None)
+                b.setdefault('refManual', False)
         data['pools'].setdefault('round', 1)
         for g in data['pools'].get('groups', []):
             g.setdefault('boards', 1)
@@ -748,18 +763,121 @@ class Store:
                         })
             nxt = next((x['id'] for x in bouts if not x['hasResult'] and not x['closed']), None)
             return {
-                'fencer': {'firstName': me['firstName'], 'lastName': me['lastName'], 'club': me['club'],
+                'fencer': {'id': me['id'], 'firstName': me['firstName'], 'lastName': me['lastName'], 'club': me['club'],
                            'ranking': me['ranking'], 'rankingSource': me['rankingSource']},
                 'pool': pool, 'bouts': bouts, 'next': nxt, 'refereeing': refereeing,
                 'poolResults': self._pool_results(me['id'], by_id),
+                'groupsCount': len(groups),
+                'round': self.data['pools'].get('round', 1),
+                'prev': self._prev_round_view(me['id'], by_id),
+                'bracket': self._player_bracket(by_id),
+                'de': self._player_de(me['id'], by_id),
             }
+
+    def _prev_round_view(self, fencer_id, by_id):
+        """Poprzednia tura grup (po utworzeniu drugiej): szachownica własnej grupy i liczba grup."""
+        current = self.data['pools'].get('round', 1)
+        entry = next((e for e in self.data['rounds'] if e['round'] == current - 1 and 'groups' in e), None)
+        if entry is None:
+            return None
+        return {'round': entry['round'], 'groupsCount': len(entry['groups']),
+                'poolResults': self._pool_results(fencer_id, by_id, entry['groups'])}
+
+    def _player_bracket(self, by_id):
+        """Drabinka do podglądu na telefonie (bez danych wrażliwych): nazwy zamiast identyfikatorów kont."""
+        bracket = self.data['bracket']
+        if bracket is None:
+            return None
+        names = {}
+        for b in self._all_bouts(bracket):
+            for fid in (b['a'], b['b'], b['ref'], b['winner']):
+                if fid and fid in by_id:
+                    f = by_id[fid]
+                    names[fid] = '{} {}'.format(f['lastName'], f['firstName'])
+        for fid in bracket['seeds']:
+            f = by_id[fid]
+            names[fid] = '{} {}'.format(f['lastName'], f['firstName'])
+        view = copy.deepcopy(bracket)
+        view['names'] = names
+        return view
+
+    @staticmethod
+    def _de_title(bracket, r):
+        in_round = bracket['size'] // (2 ** r)
+        if r == 0 and bracket['count'] < bracket['size']:
+            return 'Dobijaki (tabela {})'.format(bracket['size'])
+        return {2: 'Finał', 4: 'Półfinały', 8: 'Ćwierćfinały'}.get(in_round, 'Tabela {}'.format(in_round))
+
+    @staticmethod
+    def _numbered_bouts(bracket):
+        """Walki w kolejności numeracji (jak w widoku): rundy bez wolnych losów, walka o 3. miejsce, repasaże."""
+        out, n = [], 0
+        for r, rnd in enumerate(bracket['rounds']):
+            for i, b in enumerate(rnd):
+                if not b['bye']:
+                    n += 1
+                    out.append((n, r, i, b))
+        if bracket['third']:
+            n += 1
+            out.append((n, -1, 0, bracket['third']))
+        for gi, grp in enumerate(bracket.get('repasaze', [])):
+            for i, b in enumerate(grp['bouts']):
+                n += 1
+                out.append((n, -2 - gi, i, b))
+        return out
+
+    def _player_de(self, fencer_id, by_id):
+        """Następna walka zawodnika w drabince i walki, które ma sędziować."""
+        bracket = self.data['bracket']
+        if bracket is None:
+            return None
+        entries = self._numbered_bouts(bracket)
+        numbers = {b['id']: no for no, _r, _i, b in entries}
+
+        def label(fid):
+            f = by_id.get(fid)
+            return '{} {}'.format(f['lastName'], f['firstName']) if f else None
+
+        def title(r, b):
+            if r == -1:
+                return 'Walka o 3. miejsce'
+            if r <= -2:
+                return 'Repasaże: {}'.format(b['title'])
+            return self._de_title(bracket, r)
+
+        in_bracket = fencer_id in bracket['seeds']
+        mine = [e for e in entries if fencer_id in (e[3]['a'], e[3]['b'])]
+        de = {'inBracket': in_bracket, 'state': 'none', 'next': None, 'refereeing': []}
+        pending = [e for e in mine if e[3]['winner'] is None]
+        final = bracket['rounds'][-1][0]
+        if pending:
+            no, r, i, b = pending[0]
+            opponent = b['b'] if b['a'] == fencer_id else b['a']
+            nxt = {'id': b['id'], 'number': no, 'round': title(r, b), 'opponent': label(opponent),
+                   'referee': label(b['ref'])}
+            if opponent is None:
+                if b.get('src'):
+                    other = b['src']['b' if b['a'] == fencer_id else 'a']
+                    nxt['waitingFor'] = numbers.get(other['bout'])
+                elif r > 0:
+                    other = bracket['rounds'][r - 1][2 * i + (1 if b['a'] == fencer_id else 0)]
+                    nxt['waitingFor'] = numbers.get(other['id'])
+            de['next'] = nxt
+            de['state'] = 'ready' if opponent else 'waiting'
+        elif in_bracket:
+            de['state'] = 'winner' if final['winner'] == fencer_id else 'out'
+        for no, r, i, b in entries:
+            if b['ref'] == fencer_id and b['winner'] is None and b['a'] and b['b']:
+                de['refereeing'].append({'number': no, 'round': title(r, b), 'a': label(b['a']), 'b': label(b['b'])})
+        return de
 
     def _my_group(self, fencer_id):
         return next((g for g in self.data['pools']['groups'] if fencer_id in g['fencerIds']), None)
 
-    def _pool_results(self, fencer_id, by_id):
+    def _pool_results(self, fencer_id, by_id, groups=None):
         """Szachownica własnej grupy, dostępna dla zawodnika dopiero po zakończeniu tej grupy."""
-        g = self._my_group(fencer_id)
+        groups = self.data['pools']['groups'] if groups is None else groups
+        g = next((g for g in groups if fencer_id in g['fencerIds']), None)
         if g is None or not g['bouts'] or not pool_complete(g) or any(b['disputed'] for b in g['bouts']):
             return None
         stats = {r['id']: r for r in rank_stats(pool_stats(g['fencerIds'], g['bouts']))}
@@ -784,12 +902,68 @@ class Store:
                          'Ind': st['Ind'], 'place': st['label']})
         return {'pool': g['name'], 'rows': rows}
 
-    def player_ranking(self, token):
-        """Ranking wszystkich grup; dostępny dla zawodnika po zakończeniu jego grupy."""
+    def _archived_round(self, round_no):
+        """Zarchiwizowana tura grup (po utworzeniu następnej tury) albo None dla tury bieżącej."""
+        if round_no is None or round_no >= self.data['pools'].get('round', 1):
+            return None
+        entry = next((e for e in self.data['rounds'] if e['round'] == round_no), None)
+        if entry is None or 'groups' not in entry:
+            raise ApiError(404, 'Brak danych tej tury.')
+        return entry
+
+    def player_groups(self, token, round_no=None):
+        """Podgląd wszystkich grup wskazanej tury (składy i wyniki na żywo) dla zalogowanego zawodnika."""
         with self.lock:
             me = self.find_by_token(token)
             if not me:
                 raise ApiError(404, 'Nie znaleziono zapisu.')
+            archived = self._archived_round(round_no)
+            groups = archived['groups'] if archived else self.data['pools']['groups']
+            if not groups:
+                raise ApiError(404, 'Grupy nie zostały jeszcze utworzone.')
+            by_id = {f['id']: f for f in self.data['fencers']}
+            out = []
+            for g in groups:
+                stats = {r['id']: r for r in rank_stats(pool_stats(g['fencerIds'], g['bouts']))}
+                bouts = {frozenset((b['a'], b['b'])): b for b in g['bouts']}
+                rows = []
+                for x in g['fencerIds']:
+                    cells = []
+                    for y in g['fencerIds']:
+                        if x == y:
+                            cells.append(None)
+                            continue
+                        b = bouts[frozenset((x, y))]
+                        if not has_result(b):
+                            cells.append({'win': None, 'text': ''})
+                            continue
+                        mine, theirs = (b['sa'], b['sb']) if b['a'] == x else (b['sb'], b['sa'])
+                        if mine > theirs:
+                            cells.append({'win': True, 'text': 'V' if mine == THRESHOLD else 'V{}'.format(mine)})
+                        else:
+                            cells.append({'win': False, 'text': 'D{}'.format(mine)})
+                    st = stats[x]
+                    f = by_id.get(x, {})
+                    rows.append({'name': '{} {}'.format(f.get('lastName', '?'), f.get('firstName', '')).strip(),
+                                 'club': f.get('club', ''), 'me': x == me['id'], 'cells': cells,
+                                 'V': st['V'], 'M': st['M'], 'VM': '{:.2f}'.format(float(st['VM'])),
+                                 'TS': st['TS'], 'TR': st['TR'], 'Ind': st['Ind'], 'place': st['label']})
+                out.append({'name': g['name'], 'mine': me['id'] in g['fencerIds'],
+                            'complete': pool_complete(g) and bool(g['bouts']), 'rows': rows})
+            return {'round': archived['round'] if archived else self.data['pools'].get('round', 1), 'groups': out}
+
+    def player_ranking(self, token, round_no=None):
+        """Ranking wszystkich grup wskazanej tury; bieżącą turę widać po zakończeniu własnej grupy."""
+        with self.lock:
+            me = self.find_by_token(token)
+            if not me:
+                raise ApiError(404, 'Nie znaleziono zapisu.')
+            archived = self._archived_round(round_no)
+            if archived:
+                rows = [{'place': r['place'], 'name': r['name'], 'club': r['club'], 'pool': r['pool'], 'V': r['V'],
+                         'M': r['M'], 'VM': r['VM'], 'TS': r['TS'], 'TR': r['TR'], 'Ind': r['Ind'],
+                         'advance': False, 'me': r.get('id') == me['id']} for r in archived['standings']]
+                return {'rows': rows, 'complete': True, 'advanceCount': 0, 'archived': True, 'round': archived['round']}
             mine = self._my_group(me['id'])
             if mine is None or not pool_complete(mine):
                 raise ApiError(403, 'Ranking będzie dostępny po zakończeniu Twojej grupy.')
@@ -810,7 +984,8 @@ class Store:
                             'club': f.get('club', ''), 'pool': st['pool'], 'V': st['V'], 'M': st['M'],
                             'VM': '{:.2f}'.format(float(st['VM'])), 'TS': st['TS'], 'TR': st['TR'], 'Ind': st['Ind'],
                             'advance': complete and i < advance, 'me': st['id'] == me['id']})
-            return {'rows': out, 'complete': complete, 'advanceCount': advance}
+            return {'rows': out, 'complete': complete, 'advanceCount': advance, 'archived': False,
+                    'round': self.data['pools'].get('round', 1)}
 
     # --- ranking PZSzerm ---
 
@@ -883,7 +1058,7 @@ class Store:
         out = []
         for r in self._overall_ranking():
             f = by_id[r['id']]
-            out.append({'place': r['label'], 'name': '{} {}'.format(f['lastName'], f['firstName']),
+            out.append({'id': f['id'], 'place': r['label'], 'name': '{} {}'.format(f['lastName'], f['firstName']),
                         'club': f['club'], 'pool': r['pool'], 'V': r['V'], 'M': r['M'],
                         'VM': '{:.2f}'.format(float(r['VM'])), 'TS': r['TS'], 'TR': r['TR'], 'Ind': r['Ind']})
         return out
@@ -930,13 +1105,14 @@ class Store:
                 bouts, used = schedule.build_bouts(members, boards, clubs, new_id)
                 groups.append({'name': 'Grupa {}'.format(k + 1), 'fencerIds': members, 'boards': boards,
                                'boardsUsed': used, 'closed': False, 'bouts': bouts})
-            self.data['rounds'].append({'round': pools.get('round', 1), 'standings': self._ranking_snapshot()})
+            self.data['rounds'].append({'round': pools.get('round', 1), 'standings': self._ranking_snapshot(),
+                                        'groups': copy.deepcopy(pools['groups']), 'advanceCount': pools.get('advanceCount')})
             advance = pools.get('advanceCount')
             self.data['pools'] = {'poolSize': pool_size, 'advanceCount': None if advance is None else min(advance, total),
                                   'groups': groups, 'approved': False, 'round': pools.get('round', 1) + 1}
             self._save()
 
-    def create_bracket(self, advance):
+    def create_bracket(self, advance, percent=None, repasaze=False, depth=16):
         with self.lock:
             pools = self.data['pools']
             if not pools.get('approved'):
@@ -944,10 +1120,16 @@ class Store:
             if self.data['bracket'] is not None:
                 raise ApiError(409, 'Drabinka już istnieje. Najpierw ją usuń.')
             ranked = self._overall_ranking()
-            if advance is None:
+            if percent is not None:
+                if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not 0 < percent <= 100:
+                    raise ApiError(400, 'Procent zawodników musi być liczbą od 1 do 100.')
+                advance = max(2, min(len(ranked), round(len(ranked) * percent / 100)))
+            elif advance is None:
                 advance = pools.get('advanceCount')
             if not is_int(advance) or not 2 <= advance <= len(ranked):
                 raise ApiError(400, 'Liczba zawodników w drabince musi być liczbą od 2 do {}.'.format(len(ranked)))
+            if repasaze and (not is_int(depth) or not 8 <= depth <= 1024):
+                raise ApiError(400, 'Repasaże do miejsca: podaj liczbę od 8 do 1024.')
             seeds = [r['id'] for r in ranked[:advance]]
             size = 2
             while size < advance:
@@ -955,22 +1137,77 @@ class Store:
             order = bracket_order(size)
             first = []
             for i in range(0, size, 2):
-                a = seeds[order[i] - 1] if order[i] <= advance else None
-                b = seeds[order[i + 1] - 1] if order[i + 1] <= advance else None
+                high, low = sorted((order[i], order[i + 1]))     # wyżej rozstawiony jako pierwszy (a)
+                a = seeds[high - 1] if high <= advance else None
+                b = seeds[low - 1] if low <= advance else None
                 bye = (a is None) != (b is None)
-                first.append({'id': new_id(), 'a': a, 'b': b, 'sa': None, 'sb': None, 'bye': bye,
-                              'winner': (a or b) if bye else None})
+                first.append(self._de_bout(a, b, bye))
             rounds = [first]
             while len(rounds[-1]) > 1:
-                rounds.append([{'id': new_id(), 'a': None, 'b': None, 'sa': None, 'sb': None, 'bye': False, 'winner': None}
-                               for _ in range(len(rounds[-1]) // 2)])
+                rounds.append([self._de_bout() for _ in range(len(rounds[-1]) // 2)])
             third = None
             if size >= 4 and not any(b['bye'] for b in rounds[-2]):
-                third = {'id': new_id(), 'a': None, 'b': None, 'sa': None, 'sb': None, 'bye': False, 'winner': None}
-            bracket = {'size': size, 'count': advance, 'seeds': seeds, 'rounds': rounds, 'third': third}
+                third = self._de_bout()
+            bracket = {'size': size, 'count': advance, 'seeds': seeds, 'rounds': rounds, 'third': third,
+                       'repasaze': [], 'repasazeDepth': depth if repasaze else 0}
+            if repasaze:
+                bracket['repasaze'] = self._build_repasaze(bracket, depth)
             self._propagate(bracket)
+            self._auto_assign_referees(bracket)
             self.data['bracket'] = bracket
             self._save()
+
+    @staticmethod
+    def _de_bout(a=None, b=None, bye=False, src=None, title=''):
+        bout = {'id': new_id(), 'a': a, 'b': b, 'sa': None, 'sb': None, 'bye': bye, 'ref': None, 'refManual': False,
+                'winner': (a or b) if bye else None}
+        if src:
+            bout['src'] = src
+            bout['title'] = title
+        return bout
+
+    def _build_repasaze(self, bracket, depth):
+        """Repasaże: przegrani rundy grają między sobą walki o miejsca (np. 5-8 po ćwierćfinałach, 9-16 po 1/8).
+
+        Grupa przegranych musi mieć pełną liczbę 2^k >= 4 zawodników (bez wolnych losów w rundzie). Przegrani półfinałów
+        grają zwykłą walkę o 3. miejsce.
+        """
+        groups = []
+        size = bracket['size']
+        for r, rnd in enumerate(bracket['rounds'][:-2]):
+            n = len(rnd)
+            if any(b['bye'] for b in rnd) or n < 4 or n & (n - 1):
+                continue
+            hi = size // (2 ** r)
+            lo = hi - n + 1
+            if hi > depth:
+                continue
+            bouts = []
+            self._classification([{'t': 'loser', 'bout': b['id']} for b in rnd], lo, bouts)
+            groups.append({'places': [lo, hi], 'round': r, 'bouts': bouts})
+        return groups
+
+    def _classification(self, slots, lo, out):
+        """Pełna klasyfikacja grupy przegranych: zwycięzcy walczą o lepsze, przegrani o gorsze miejsca."""
+        n = len(slots)
+        if n == 2:
+            out.append(self._de_bout(src={'a': slots[0], 'b': slots[1]}, title='Walka o {}. miejsce'.format(lo)))
+            return
+        hi = lo + n - 1
+        firsts = [self._de_bout(src={'a': slots[i], 'b': slots[i + 1]}, title='Miejsca {}–{}'.format(lo, hi))
+                  for i in range(0, n, 2)]
+        out.extend(firsts)
+        self._classification([{'t': 'winner', 'bout': b['id']} for b in firsts], lo, out)
+        self._classification([{'t': 'loser', 'bout': b['id']} for b in firsts], lo + n // 2, out)
+
+    @staticmethod
+    def _all_bouts(bracket):
+        bouts = [b for rnd in bracket['rounds'] for b in rnd]
+        if bracket['third']:
+            bouts.append(bracket['third'])
+        for grp in bracket.get('repasaze', []):
+            bouts.extend(grp['bouts'])
+        return bouts
 
     @staticmethod
     def _loser(bout):
@@ -979,7 +1216,7 @@ class Store:
         return bout['b'] if bout['winner'] == bout['a'] else bout['a']
 
     def _propagate(self, bracket):
-        """Wstawia zwycięzców do kolejnych walk i przegranych półfinałów do walki o 3. miejsce."""
+        """Wstawia zwycięzców do kolejnych walk, przegranych półfinałów do walki o 3. miejsce i przegranych do repasaży."""
         rounds = bracket['rounds']
         for r in range(1, len(rounds)):
             for i, bout in enumerate(rounds[r]):
@@ -989,22 +1226,122 @@ class Store:
             semis = rounds[-2]
             bracket['third']['a'] = self._loser(semis[0])
             bracket['third']['b'] = self._loser(semis[1])
+        index = {b['id']: b for b in self._all_bouts(bracket)}
+        for grp in bracket.get('repasaze', []):
+            for bout in grp['bouts']:
+                for side in ('a', 'b'):
+                    spec = bout['src'][side]
+                    source = index[spec['bout']]
+                    bout[side] = source['winner'] if spec['t'] == 'winner' else self._loser(source)
+
+    def _auto_assign_referees(self, bracket):
+        """Przydziela sędziów walkom drabinki (także repasażom), gdy znani są obaj zawodnicy; ręczni zostają.
+
+        Preferencje: ktoś spoza drabinki, potem zawodnik, który już skończył grę, potem ktoś wolny w tym etapie,
+        na końcu walczący w tym samym etapie. Dalej: kto sędziuje najmniej, nie sędziuje innej walki etapu
+        i jest z innego klubu niż walczący.
+        """
+        rounds = bracket['rounds']
+        entries = [(('m', r), b) for r, rnd in enumerate(rounds) for b in rnd]
+        if bracket['third']:
+            entries.append((('m', len(rounds) - 1), bracket['third']))
+        for gi, grp in enumerate(bracket.get('repasaze', [])):
+            entries.extend((('c', gi), b) for b in grp['bouts'])
+        clubs = self._club_keys()
+        all_ids = [f['id'] for f in self.data['fencers']]
+        seeds = set(bracket['seeds'])
+
+        pending = set()      # zawodnicy, którzy jeszcze grają (są w nierozegranej walce)
+        for _key, b in entries:
+            if b['winner'] is None and not b['bye']:
+                pending.update(x for x in (b['a'], b['b']) if x)
+        counts, fighting, stage_refs = {}, {}, {}
+        for key, b in entries:
+            if b['ref']:
+                counts[b['ref']] = counts.get(b['ref'], 0) + 1
+            if b['winner'] is None and not b['bye']:
+                fighting.setdefault(key, set()).update(x for x in (b['a'], b['b']) if x)
+                if b['ref']:
+                    stage_refs.setdefault(key, set()).add(b['ref'])
+
+        for key, b in entries:
+            if b['winner'] is not None or b['bye'] or b['refManual'] or not (b['a'] and b['b']):
+                continue
+            if b['ref'] and b['ref'] not in (b['a'], b['b']):
+                continue
+            if b['ref']:
+                stage_refs.get(key, set()).discard(b['ref'])
+                counts[b['ref']] -= 1
+                b['ref'] = None
+            best = None
+            for fid in all_ids:
+                if fid in (b['a'], b['b']):
+                    continue
+                if fid not in seeds:
+                    tier = 0
+                elif fid not in pending:
+                    tier = 1
+                elif fid not in fighting.get(key, ()):
+                    tier = 2
+                else:
+                    tier = 3
+                same_club = bool(clubs[fid]) and clubs[fid] in (clubs[b['a']], clubs[b['b']])
+                rank = (tier, fid in stage_refs.get(key, ()), counts.get(fid, 0), same_club, random.random())
+                if best is None or rank < best[0]:
+                    best = (rank, fid)
+            if best is not None:
+                b['ref'] = best[1]
+                counts[best[1]] = counts.get(best[1], 0) + 1
+                stage_refs.setdefault(key, set()).add(best[1])
+
+    def _find_any_bout(self, bracket, bout_id):
+        for b in self._all_bouts(bracket):
+            if b['id'] == bout_id:
+                return b
+        raise ApiError(404, 'Nie ma takiej walki.')
+
+    @staticmethod
+    def _dependents(bracket, bout):
+        """Walki, których uczestnicy zależą od wyniku tej walki."""
+        out = []
+        rounds = bracket['rounds']
+        for r, rnd in enumerate(rounds):
+            for i, b in enumerate(rnd):
+                if b['id'] != bout['id']:
+                    continue
+                if r + 1 < len(rounds):
+                    out.append(rounds[r + 1][i // 2])
+                if bracket['third'] is not None and r == len(rounds) - 2:
+                    out.append(bracket['third'])
+        for grp in bracket.get('repasaze', []):
+            for b in grp['bouts']:
+                if any(b['src'][side]['bout'] == bout['id'] for side in ('a', 'b')):
+                    out.append(b)
+        return out
+
+    def bracket_set_referee(self, bout_id, referee_id):
+        with self.lock:
+            bracket = self.data['bracket']
+            if bracket is None:
+                raise ApiError(404, 'Drabinka nie istnieje.')
+            bout = self._find_any_bout(bracket, bout_id)
+            if bout['bye']:
+                raise ApiError(409, 'W walce z wolnym losem nie ma sędziego.')
+            if referee_id is not None and not self._fencer(referee_id):
+                raise ApiError(400, 'Nie ma takiego zawodnika.')
+            if referee_id in (bout['a'], bout['b']) and referee_id is not None:
+                raise ApiError(400, 'Sędzią nie może być zawodnik walczący w tym meczu.')
+            bout['ref'] = referee_id
+            bout['refManual'] = True
+            self._auto_assign_referees(bracket)
+            self._save()
 
     def bracket_set_score(self, bout_id, sa, sb):
         with self.lock:
             bracket = self.data['bracket']
             if bracket is None:
                 raise ApiError(404, 'Drabinka nie istnieje.')
-            found = None
-            for r, rnd in enumerate(bracket['rounds']):
-                for i, b in enumerate(rnd):
-                    if b['id'] == bout_id:
-                        found = (r, i, b)
-            if found is None and bracket['third'] is not None and bracket['third']['id'] == bout_id:
-                found = (-1, 0, bracket['third'])
-            if found is None:
-                raise ApiError(404, 'Nie ma takiej walki.')
-            r, i, bout = found
+            bout = self._find_any_bout(bracket, bout_id)
             if bout['bye'] or bout['a'] is None or bout['b'] is None:
                 raise ApiError(409, 'W tej walce nie są jeszcze znani obaj zawodnicy.')
             for v in (sa, sb):
@@ -1016,15 +1353,11 @@ class Store:
             if sa is not None and sb is not None:
                 new_winner = bout['a'] if sa > sb else bout['b']
             if new_winner != bout['winner']:
-                downstream = []
-                if r >= 0 and r + 1 < len(bracket['rounds']):
-                    downstream.append(bracket['rounds'][r + 1][i // 2])
-                if r == len(bracket['rounds']) - 2 and bracket['third'] is not None:
-                    downstream.append(bracket['third'])
-                if any(d['sa'] is not None or d['sb'] is not None for d in downstream):
+                if any(d['sa'] is not None or d['sb'] is not None for d in self._dependents(bracket, bout)):
                     raise ApiError(409, 'Walka następnej rundy ma już wynik. Najpierw usuń jej wynik.')
             bout['sa'], bout['sb'], bout['winner'] = sa, sb, new_winner
             self._propagate(bracket)
+            self._auto_assign_referees(bracket)
             self._save()
 
     def delete_bracket(self):
@@ -1239,8 +1572,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(201, view)
         if method == 'POST' and path == '/api/me':
             return self._json(200, self._player_view(self._read_body().get('token')))
+        if method == 'POST' and path == '/api/me/groups':
+            body = self._read_body()
+            return self._json(200, STORE.player_groups(body.get('token'), body.get('round')))
         if method == 'POST' and path == '/api/me/ranking':
-            return self._json(200, STORE.player_ranking(self._read_body().get('token')))
+            body = self._read_body()
+            return self._json(200, STORE.player_ranking(body.get('token'), body.get('round')))
         if method == 'POST' and path == '/api/bout/score':
             body = self._read_body()
             STORE.player_score(body.get('token'), body.get('id'), body.get('mine'), body.get('theirs'))
@@ -1320,10 +1657,16 @@ class Handler(BaseHTTPRequestHandler):
             STORE.create_round2(body.get('poolSize'), body.get('boards'))
             return self._json(200, {'ok': True})
         if method == 'POST' and route == 'bracket':
-            STORE.create_bracket(self._read_body().get('count'))
+            body = self._read_body()
+            STORE.create_bracket(body.get('count'), body.get('percent'), bool(body.get('repasaze')),
+                                 body.get('depth', 16))
             return self._json(200, {'ok': True})
         if method == 'POST' and route == 'bracket/delete':
             STORE.delete_bracket()
+            return self._json(200, {'ok': True})
+        if method == 'POST' and route == 'bracket/bout/referee':
+            body = self._read_body()
+            STORE.bracket_set_referee(body.get('id'), body.get('referee'))
             return self._json(200, {'ok': True})
         if method == 'PUT' and route == 'bracket/bout':
             body = self._read_body()
