@@ -51,13 +51,14 @@
     '.de-bout.de-next{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);}',
     '.de-bout.de-flash{animation:de-flash 1s ease-in-out 3;}',
     '@keyframes de-flash{0%,100%{box-shadow:0 0 0 1px var(--accent);}50%{box-shadow:0 0 0 7px var(--accent);}}',
+    '.de-flow{font-size:.74em;color:var(--muted);padding:0 .8em .2em;}',
+    '.de-comp-label{font-size:.85em;font-weight:600;color:var(--muted);align-self:end;padding:0 .2em .1em;}',
     '.de-rep{margin-top:18px;}',
     '.de-rep h3{margin:0 0 8px;font-size:1em;}',
-    '.de-rep-grid{display:flex;flex-wrap:wrap;gap:.9em;align-items:flex-start;}',
-    '.de-rep-card{flex:0 0 auto;}',
     '.de-lines{position:absolute;left:0;top:0;pointer-events:none;z-index:0;overflow:visible;}',
     '.de-lines path{fill:none;stroke:var(--muted);stroke-width:1.5;opacity:.55;}',
     '.de-lines path.won{stroke:var(--accent);stroke-width:2.5;opacity:1;}',
+    '.de-lines path.dashed{stroke-dasharray:5 4;}',
     '.de-lines marker path{fill:var(--muted);stroke:none;opacity:.8;}',
     '.de-lines marker.won path{fill:var(--accent);opacity:1;}'
   ].join('\n');
@@ -77,6 +78,18 @@
     if (bouts >= 16) return 0.76;
     if (bouts >= 8) return 0.88;
     return 1;
+  }
+
+  // Skala dla tabeli o danej liczbie kolumn i walk w pierwszej kolumnie.
+  function computeScale(container, state, ctx, cols, bouts) {
+    var scale = scaleFor(bouts);
+    if (ctx.fit) {
+      var natural = cols * BASE_COL_PX + (cols - 1) * BASE_GAP_PX;
+      var avail = container.clientWidth || (window.innerWidth - 32);
+      scale = Math.max(0.6, Math.min(scale, avail / natural));   // nie mniej niż 60% (czytelność), reszta przewijana
+      scale = Math.max(0.4, Math.min(1.6, scale * (state.zoom || 1)));
+    }
+    return scale;
   }
 
   function roundTitle(bracket, index) {
@@ -109,7 +122,7 @@
     return { rounds: rounds, third: third, rep: rep, byId: byId };
   }
 
-  function buildBout(bracket, b, title, hints, ctx) {
+  function buildBout(bracket, b, title, hints, ctx, flow) {
     var card = document.createElement('div');
     card.className = 'de-bout' + (ctx.highlight && ctx.highlight === b.id ? ' de-next' : '');
     card.setAttribute('data-bout', b.id);
@@ -117,6 +130,12 @@
     head.className = 'de-title';
     head.textContent = title;
     card.appendChild(head);
+    if (flow) {
+      var flowLine = document.createElement('div');
+      flowLine.className = 'de-flow';
+      flowLine.textContent = flow;
+      card.appendChild(flowLine);
+    }
     var inputs = [];
     var rows = {};
     ['a', 'b'].forEach(function (side) {
@@ -199,7 +218,8 @@
     return card;
   }
 
-  function drawLines(grid, cards) {
+  // Rysuje strzałki między kartami. edges: [{ from: karta źródłowa, to: wiersz docelowy, won, dashed }]
+  function drawEdges(grid, edges) {
     var NS = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('class', 'de-lines');
@@ -228,21 +248,186 @@
       var r = el.getBoundingClientRect();
       return { left: r.left - box.left, right: r.right - box.left, mid: r.top - box.top + r.height / 2 };
     }
-    for (var r = 0; r < cards.length - 1; r++) {
-      cards[r].forEach(function (card, i) {
-        var target = cards[r + 1][i >> 1];
-        var from = rel(card);
-        var to = rel(target._rows[i % 2 === 0 ? 'a' : 'b']);
-        var mid = from.right + (to.left - from.right) / 2;
-        var path = document.createElementNS(NS, 'path');
-        var won = !!card._winner;
+    edges.forEach(function (edge, k) {
+      var from = rel(edge.from);
+      var to = rel(edge.to);
+      var path = document.createElementNS(NS, 'path');
+      if (edge.back) {
+        // strzałka do tyłu (w lewo): z lewej krawędzi karty źródłowej do prawej krawędzi docelowej
+        var midBack = from.left - (from.left - to.right) / 2 + (edge.shift || 0);
+        path.setAttribute('d', 'M' + from.left + ',' + from.mid + ' H' + midBack + ' V' + to.mid + ' H' + (to.right + 1));
+      } else {
+        // lekkie przesunięcie pionowej części, żeby się nie nakładały
+        var mid = from.right + (to.left - from.right) / 2 + (edge.shift || 0);
         path.setAttribute('d', 'M' + from.right + ',' + from.mid + ' H' + mid + ' V' + to.mid + ' H' + (to.left - 1));
-        path.setAttribute('marker-end', 'url(#de-arrow' + (won ? 'won' : '') + ')');
-        if (won) path.setAttribute('class', 'won');
-        svg.appendChild(path);
-      });
-    }
+      }
+      path.setAttribute('marker-end', 'url(#de-arrow' + (edge.won ? 'won' : '') + ')');
+      var cls = (edge.won ? 'won' : '') + (edge.dashed ? ' dashed' : '');
+      if (cls.trim()) path.setAttribute('class', cls.trim());
+      svg.appendChild(path);
+    });
     grid.appendChild(svg);
+  }
+
+  // Repasaż jako zestaw tabelek jedna pod drugą w tych samych kolumnach (kolumna = etap).
+  // Każda tabelka to zwykłe drzewo zwycięzców (strzałki ciągłe, bez przecinania się); dokąd idzie przegrany,
+  // pokazuje linia „przegrany → walka N” na karcie, bo strzałki przegranych musiałyby się przecinać.
+  // Kolejność tabelek: wg miejsca, o które toczy się ich końcowa walka (9., 11., 13., 15. ...).
+  function renderRepGroup(container, bracket, grp, gi, numbers, state, ctx) {
+    var bouts = grp.bouts;
+    var byId = {};
+    bouts.forEach(function (b) { byId[b.id] = b; });
+
+    // etap = kolumna (0: walki z przegranymi z głównej tabeli)
+    var depth = {};
+    bouts.forEach(function (b) {
+      var d = 0;
+      ['a', 'b'].forEach(function (k) {
+        var src = depth[b.src[k].bout];
+        if (src !== undefined) d = Math.max(d, src + 1);
+      });
+      depth[b.id] = d;
+    });
+    var cols = 0;
+    bouts.forEach(function (b) { cols = Math.max(cols, depth[b.id] + 1); });
+
+    // drzewa zwycięzców: dzieci walki to walki, z których bierze ZWYCIĘZCÓW
+    var kids = {};
+    var hasParent = {};
+    bouts.forEach(function (b) {
+      kids[b.id] = ['a', 'b'].filter(function (k) { return b.src[k].t === 'winner' && byId[b.src[k].bout]; })
+        .map(function (k) { return b.src[k].bout; });
+      kids[b.id].forEach(function (id) { hasParent[id] = true; });
+    });
+    function rootPlace(b) {
+      var m = /Walka o (\d+)\./.exec(b.title);
+      return m ? Number(m[1]) : 9999;
+    }
+    var roots = bouts.filter(function (b) { return !hasParent[b.id]; });
+    roots.sort(function (x, y) { return rootPlace(x) - rootPlace(y); });
+
+    // układ lokalny każdej tabelki w półwierszach: etykieta w wierszu 0, liście co 2 (karta = 2 półwiersze),
+    // rodzic pośrodku swoich dzieci
+    var comps = roots.map(function (root) {
+      var top = {};
+      var leaf = 0;
+      var first = null;
+      (function place(id) {
+        var ks = kids[id];
+        if (!ks.length) {
+          top[id] = 1 + 2 * leaf++;
+          if (first === null) first = id;
+          return;
+        }
+        ks.forEach(place);
+        top[id] = Math.round(ks.reduce(function (sum, k) { return sum + top[k]; }, 0) / ks.length);
+      })(root.id);
+      var ids = Object.keys(top);
+      var cells = ids.map(function (id) { return { col: depth[id], r0: top[id], r1: top[id] + 2 }; });
+      cells.push({ col: depth[first], r0: 0, r1: 1 });                         // etykieta tabelki
+      return { root: root, top: top, ids: ids, first: first, cells: cells };
+    });
+
+    // upakowanie: każda tabelka wskakuje w najwyższe wolne miejsce siatki, ale jej końcowa walka (o miejsce)
+    // musi leżeć pod końcową walką poprzedniej tabelki, więc kolejność miejsc (9., 11., 13., 15.) zostaje
+    var occupied = {};
+    var absTop = {};
+    var labels = [];
+    var prevRootBottom = 0;
+    var halfRows = 0;
+    comps.forEach(function (comp) {
+      var off = Math.max(0, prevRootBottom - comp.top[comp.root.id]);
+      function fits(o) {
+        return comp.cells.every(function (c) {
+          return !(occupied[c.col] || []).some(function (iv) { return c.r0 + o < iv[1] && c.r1 + o > iv[0]; });
+        });
+      }
+      while (!fits(off)) off++;
+      comp.cells.forEach(function (c) {
+        (occupied[c.col] = occupied[c.col] || []).push([c.r0 + off, c.r1 + off]);
+        halfRows = Math.max(halfRows, c.r1 + off);
+      });
+      comp.ids.forEach(function (id) { absTop[id] = comp.top[id] + off; });
+      labels.push({ row: off, col: depth[comp.first], text: byId[comp.first].title });
+      prevRootBottom = comp.top[comp.root.id] + off + 2;
+    });
+
+    // dokąd idą zwycięzca i przegrany (opis na karcie)
+    var flow = {};
+    bouts.forEach(function (b) {
+      ['a', 'b'].forEach(function (k) {
+        var spec = b.src[k];
+        if (!byId[spec.bout]) return;
+        flow[spec.bout] = flow[spec.bout] || {};
+        flow[spec.bout][spec.t] = numbers.byId[b.id];
+      });
+    });
+
+    var section = document.createElement('div');
+    section.className = 'de-rep';
+    var title = document.createElement('h3');
+    title.textContent = 'Repasaże: miejsca ' + grp.places[0] + '–' + grp.places[1];
+    section.appendChild(title);
+
+    // repasaże są gęstsze niż główna tabela: mniejsza czcionka i karty, a wiersz ma wysokość karty (bez dużych odstępów)
+    var baseScale = computeScale(container, state, ctx, cols, bouts.filter(function (b) { return depth[b.id] === 0; }).length);
+    var scale = Math.max(0.55, baseScale * 0.82);
+    var fontPx = BASE_FONT_PX * scale;
+    var rowPx = Math.round(fontPx * (ctx.editable ? 9.0 : 8.0));
+    var halfPx = Math.max(1, Math.floor(rowPx / 2));
+    var scroll = document.createElement('div');
+    scroll.className = 'de-scroll';
+    var grid = document.createElement('div');
+    grid.className = 'de-grid';
+    grid.style.fontSize = fontPx.toFixed(2) + 'px';
+    grid.style.columnGap = Math.max(24, Math.round(36 * scale)) + 'px';
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ', ' + Math.round(BASE_COL_PX * scale) + 'px)';
+    grid.style.gridTemplateRows = 'repeat(' + halfRows + ', ' + halfPx + 'px)';
+
+    labels.forEach(function (l) {
+      var el = document.createElement('div');
+      el.className = 'de-comp-label';
+      el.style.gridColumn = String(l.col + 1);
+      el.style.gridRow = String(1 + l.row);
+      el.textContent = l.text;
+      grid.appendChild(el);
+    });
+
+    var cardById = {};
+    bouts.forEach(function (b) {
+      var hints = {};
+      ['a', 'b'].forEach(function (k) {
+        var spec = b.src[k];
+        hints[k] = (spec.t === 'winner' ? 'Zwycięzca walki ' : 'Przegrany walki ') + numbers.byId[spec.bout];
+      });
+      var f = flow[b.id] || {};
+      var parts = [];
+      if (f.winner) parts.push('Zwycięzca → walka ' + f.winner);
+      if (f.loser) parts.push((parts.length ? 'przegrany' : 'Przegrany') + ' → walka ' + f.loser);
+      var slot = document.createElement('div');
+      slot.className = 'de-slot';
+      slot.style.gridColumn = String(depth[b.id] + 1);
+      slot.style.gridRow = (1 + absTop[b.id]) + ' / span 2';
+      var card = buildBout(bracket, b, 'Walka ' + numbers.byId[b.id] + ' · ' + b.title, hints, ctx, parts.join(' · '));
+      cardById[b.id] = card;
+      slot.appendChild(card);
+      grid.appendChild(slot);
+    });
+    scroll.appendChild(grid);
+    section.appendChild(scroll);
+    container.appendChild(section);
+
+    var edges = [];
+    bouts.forEach(function (b, k) {
+      ['a', 'b'].forEach(function (sideKey) {
+        var spec = b.src[sideKey];
+        if (spec.t !== 'winner' || !cardById[spec.bout]) return;     // tylko drzewo zwycięzców: bez przecięć
+        edges.push({ from: cardById[spec.bout], to: cardById[b.id]._rows[sideKey], won: !!byId[spec.bout].winner });
+      });
+    });
+    requestAnimationFrame(function () {
+      if (grid.isConnected && grid.offsetWidth > 0) drawEdges(grid, edges);
+    });
   }
 
   function render(container, bracket, ctx) {
@@ -302,14 +487,7 @@
     var visible = rounds.slice(from);
     var base = visible[0].length;
     var extra = bracket.third ? 1 : 0;
-    var scale = scaleFor(base);
-    if (ctx.fit) {
-      var cols = visible.length;
-      var natural = cols * BASE_COL_PX + (cols - 1) * BASE_GAP_PX;
-      var avail = container.clientWidth || (window.innerWidth - 32);
-      scale = Math.max(0.6, Math.min(scale, avail / natural));   // nie mniej niż 60% (czytelność), reszta przewijana
-      scale = Math.max(0.4, Math.min(1.6, scale * (state.zoom || 1)));
-    }
+    var scale = computeScale(container, state, ctx, visible.length, base);
     var rowPx = Math.round((ctx.editable ? BASE_ROW_EDIT_PX : BASE_ROW_PX) * scale);
 
     var scroll = document.createElement('div');
@@ -366,35 +544,20 @@
     container.appendChild(scroll);
     scroll.scrollLeft = previousScroll;
 
-    // repasaże: walki o miejsca (przegrani rundy grają między sobą klasyfikację)
-    (bracket.repasaze || []).forEach(function (grp, gi) {
-      var section = document.createElement('div');
-      section.className = 'de-rep';
-      section.style.fontSize = (BASE_FONT_PX * scale).toFixed(2) + 'px';
-      var title = document.createElement('h3');
-      title.textContent = 'Repasaże: miejsca ' + grp.places[0] + '–' + grp.places[1];
-      section.appendChild(title);
-      var list = document.createElement('div');
-      list.className = 'de-rep-grid';
-      grp.bouts.forEach(function (b, i) {
-        var hints = {};
-        ['a', 'b'].forEach(function (side) {
-          var spec = b.src[side];
-          var no = numbers.byId[spec.bout];
-          hints[side] = (spec.t === 'winner' ? 'Zwycięzca walki ' : 'Przegrany walki ') + no;
-        });
-        var wrap = document.createElement('div');
-        wrap.className = 'de-rep-card';
-        wrap.style.width = Math.round(BASE_COL_PX * scale) + 'px';
-        wrap.appendChild(buildBout(bracket, b, 'Walka ' + numbers.rep[gi][i] + ' · ' + b.title, hints, ctx));
-        list.appendChild(wrap);
+    var edges = [];
+    for (var cr = 0; cr < cards.length - 1; cr++) {
+      cards[cr].forEach(function (card, i) {
+        edges.push({ from: card, to: cards[cr + 1][i >> 1]._rows[i % 2 === 0 ? 'a' : 'b'], won: !!card._winner });
       });
-      section.appendChild(list);
-      container.appendChild(section);
-    });
+    }
     requestAnimationFrame(function () {
-      if (grid.isConnected && grid.offsetWidth > 0) drawLines(grid, cards);
+      if (grid.isConnected && grid.offsetWidth > 0) drawEdges(grid, edges);
       container.style.minHeight = '';
+    });
+
+    // repasaże: walki o miejsca, tabelka pod tabelką (patrz renderRepGroup)
+    (bracket.repasaze || []).forEach(function (grp, gi) {
+      renderRepGroup(container, bracket, grp, gi, numbers, state, ctx);
     });
   }
 
