@@ -5,3 +5,6 @@ data.json.tmp
 # Python
 __pycache__/
 *.pyc
+
+# archiwa zakończonych turniejów (też dane osobowe)
+archiwum/

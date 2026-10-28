@@ -1,7 +1,7 @@
-"""Układanie walk w puli: tury, plansze i sędziowie.
+"""Układanie walk w grupie: tury, plansze i sędziowie.
 
-Szablon tur liczymy raz dla pary (liczba zawodników, liczba plansz), bo pule o tym samym
-rozmiarze mają taki sam układ; dopiero sędziów dobieramy osobno dla każdej puli (kluby).
+Szablon tur liczymy raz dla pary (liczba zawodników, liczba plansz), bo grupy o tym samym
+rozmiarze mają taki sam układ; dopiero sędziów dobieramy osobno dla każdej grupy (kluby).
 """
 import random
 from functools import lru_cache
@@ -68,7 +68,7 @@ def template(n, boards):
     """Zwraca (tury, użyte_plansze). Tura to krotka par (i, j) w kolejności plansz."""
     if n < 2:
         return (), 1
-    used = max(1, min(boards, n // 2))
+    used = max(1, min(boards, n // 3))   # każda walka potrzebuje sędziego z grupy: 2 walczących + 1 sędzia na planszę
     pairs = n * (n - 1) // 2
     ideal = -(-pairs // used)
     restarts = 400 if n <= 12 else 80
@@ -85,7 +85,7 @@ def template(n, boards):
 
 
 def assign_referees(n, turns, clubs):
-    """Dla każdej walki wybiera sędziego spośród zawodników puli, którzy nie walczą w tej turze.
+    """Dla każdej walki wybiera sędziego spośród zawodników grupy, którzy nie walczą w tej turze.
 
     Preferencje (od najważniejszej): nie walczy też w następnej turze, sędziował dotąd najmniej,
     inny klub niż walczący, nie walczył w poprzedniej turze. Zwraca listę tur; w turze lista
@@ -139,6 +139,8 @@ def build_bouts(fencer_ids, boards, clubs_by_id, new_id):
                 'sb': None,
                 'by': None,
                 'disputed': False,
+                'editRequested': False,
+                'editApproved': False,
                 'turn': t + 1,
                 'slot': s + 1,
                 'ref': fencer_ids[ref] if ref is not None else None,

@@ -160,12 +160,33 @@
   .pool h2 { margin-bottom: 8px; }
   .pool h3 { font-size: 0.95rem; margin: 16px 0 8px; color: var(--muted); }
   .bout-item { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .frozen .pool input, .frozen .pool select, .frozen .pool button { pointer-events: none; opacity: 0.6; }
+  .de-scroll { overflow-x: auto; padding-bottom: 8px; }
+  .de-grid { position: relative; display: grid; column-gap: 44px; width: max-content; }
+  .de-head { font-weight: 700; font-size: 0.95rem; align-self: center; }
+  .de-slot { display: flex; align-items: center; min-width: 0; }
+  .de-bout { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); position: relative; z-index: 1; }
+  .de-bout .de-title { font-size: 0.72rem; color: var(--muted); padding: 3px 8px 0; }
+  .de-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 8px; }
+  .de-row + .de-row { border-top: 1px solid var(--border); }
+  .de-row .de-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .de-row .de-seed { color: var(--muted); font-size: 0.78rem; min-width: 1.9em; }
+  .de-row.win { font-weight: 700; background: var(--win-bg); }
+  .de-row.empty-slot .de-name { color: var(--muted); font-style: italic; font-weight: 400; }
+  .de-row input { width: 3.3em; padding: 3px 4px; text-align: center; }
+  .de-lines { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
+  .de-lines path { fill: none; stroke: var(--muted); stroke-width: 1.5; opacity: 0.55; }
+  .de-lines path.won { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+  .de-lines marker path { fill: var(--muted); stroke: none; opacity: 0.8; }
+  .de-lines marker.won path { fill: var(--accent); opacity: 1; }
+  .bout-item.edit-request { border-left: 3px solid var(--accent); padding-left: 8px; }
   .bout-item.disputed { background: var(--lose-bg); border-radius: 6px; padding: 6px 8px; }
   .bout { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .bout .where { color: var(--muted); font-size: 0.85rem; white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 6.5em; }
   .bout-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 0 2.2em; font-size: 0.85rem; color: var(--muted); }
   .bout-meta label.ref { flex-direction: row; align-items: center; gap: 6px; }
   .bout-meta select { font: inherit; font-size: 0.85rem; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; max-width: 220px; }
+  .move-select { font: inherit; font-size: 0.8rem; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; max-width: 150px; }
   .bout-meta button { padding: 3px 8px; font-size: 0.85rem; }
   .note.warn { color: var(--danger); }
   .pool-info { margin-top: 8px; }
@@ -199,12 +220,13 @@
   <div id="app" hidden>
   <nav class="tabs" role="tablist">
     <button type="button" role="tab" class="tab active" id="tab-fencers" aria-selected="true" aria-controls="view-fencers">Zawodnicy</button>
-    <button type="button" role="tab" class="tab" id="tab-pools" aria-selected="false" aria-controls="view-pools">Pule</button>
+    <button type="button" role="tab" class="tab" id="tab-pools" aria-selected="false" aria-controls="view-pools">Grupy</button>
+    <button type="button" role="tab" class="tab" id="tab-bracket" aria-selected="false" aria-controls="view-bracket">Drabinka</button>
   </nav>
 
   <div id="view-fencers" role="tabpanel">
     <div class="notice" id="fencer-lock-notice" hidden>
-      Lista jest zablokowana, bo pule są utworzone. Odblokuj ją w karcie Pule.
+      Lista jest zablokowana, bo grupy są utworzone. Odblokuj ją w karcie Grupy.
     </div>
 
     <section class="panel">
@@ -226,21 +248,31 @@
     <section class="panel">
       <h2>Ranking PZSzerm</h2>
       <div class="muted" id="ranking-meta"></div>
-      <label style="margin-top: 12px;">Link do klasyfikacji
-        <input id="ranking-url" type="url" value="https://pzszerm.pl/zawody/klasyfikacje/klasyfikacja/?id=1070">
+      <label style="margin-top: 12px;">Plik klasyfikacji (strona zapisana z przeglądarki jako „tylko HTML”)
+        <input id="ranking-file" type="file" accept=".html,.htm">
       </label>
       <div class="actions">
-        <button type="button" class="primary" id="ranking-fetch-btn">Pobierz z linku</button>
+        <button type="button" class="primary" id="ranking-file-btn">Importuj z pliku</button>
       </div>
-      <details id="ranking-paste-box">
-        <summary>Wklej tabelę (gdy pobranie z linku nie działa)</summary>
-        <textarea id="ranking-text" rows="6" placeholder="Skopiuj całą tabelę ze strony PZSzerm (od nagłówka „Miejsce”) i wklej tutaj"></textarea>
-        <div class="actions">
-          <button type="button" id="ranking-paste-btn">Importuj z wklejonej tabeli</button>
-        </div>
-      </details>
       <div class="error" id="ranking-error" role="alert"></div>
       <div class="notice" id="ranking-ok" hidden></div>
+      <details id="ranking-preview-box">
+        <summary>Podgląd wczytanej klasyfikacji</summary>
+        <label style="margin-top: 12px;">Szukaj
+          <input id="ranking-filter" type="search" placeholder="nazwisko lub klub">
+        </label>
+        <div class="muted" id="ranking-preview-meta"></div>
+        <div style="overflow-x: auto;">
+          <table>
+            <thead><tr><th>Miejsce</th><th>Imię i nazwisko</th><th>Klub</th><th>Zapisany zawodnik</th></tr></thead>
+            <tbody id="ranking-preview-body"></tbody>
+          </table>
+        </div>
+        <details id="ranking-skipped-box" hidden>
+          <summary id="ranking-skipped-title"></summary>
+          <pre class="mono" id="ranking-skipped" style="max-height: 200px; overflow: auto; white-space: pre-wrap;"></pre>
+        </details>
+      </details>
     </section>
 
     <section class="panel" id="personal-panel" hidden>
@@ -274,8 +306,8 @@
           <label>Kraj
             <input id="country" name="country" maxlength="3" value="POL" autocomplete="off">
           </label>
-          <label>Ranking * (999 = bez rankingu)
-            <input id="ranking" name="ranking" type="number" min="1" max="9999" step="1" required>
+          <label>Ranking (puste = z klasyfikacji PZSzerm, 999 = bez rankingu)
+            <input id="ranking" name="ranking" type="number" min="1" max="9999" step="1">
           </label>
         </div>
         <div class="error" id="form-error" role="alert"></div>
@@ -307,22 +339,32 @@
         <div class="empty" id="empty" hidden>Brak zawodników. Dodaj pierwszego powyżej albo poczekaj na zapisy z telefonów.</div>
       </div>
     </section>
+
+    <section class="panel">
+      <h2>Nowy turniej</h2>
+      <div class="muted">Zapisuje kopię bieżących danych (zawodnicy, grupy, wyniki) w folderze <span class="mono">archiwum</span> obok serwera i czyści turniej. Wczytana klasyfikacja PZSzerm zostaje.</div>
+      <div class="actions">
+        <button type="button" class="danger" id="new-tournament-btn">Nowy turniej</button>
+      </div>
+      <div class="error" id="new-tournament-error" role="alert"></div>
+      <div class="notice" id="new-tournament-ok" hidden></div>
+    </section>
   </div>
 
   <div id="view-pools" role="tabpanel" hidden>
     <section class="panel">
-      <h2>Ustawienia pul</h2>
+      <h2>Ustawienia grup</h2>
       <div id="pool-create" class="grid">
-        <label>Rozmiar puli
-          <input id="pool-size" type="number" min="2" step="1" value="7">
+        <label>Rozmiar grupy
+          <input id="pool-size" type="number" min="2" step="1">
         </label>
-        <label>Plansze na pulę
+        <label>Górny limit plansz na grupę
           <input id="boards-default" type="number" min="1" max="20" step="1" value="1">
         </label>
         <div class="muted" id="pool-count-info" style="align-self: end;"></div>
       </div>
       <div class="actions" id="pool-create-actions">
-        <button type="button" class="primary" id="create-pools-btn">Utwórz pule</button>
+        <button type="button" class="primary" id="create-pools-btn">Utwórz grupy</button>
       </div>
       <div class="grid" style="margin-top: 12px;">
         <label>Liczba awansujących (osób)
@@ -330,8 +372,8 @@
         </label>
       </div>
       <div class="notice" id="pool-lock-notice" hidden>
-        <span>Pule są utworzone, lista zawodników jest zablokowana, a zapisy zamknięte.</span>
-        <button type="button" class="danger" id="unlock-btn">Usuń pule i odblokuj listę</button>
+        <span>Grupy są utworzone, lista zawodników jest zablokowana, a zapisy zamknięte.</span>
+        <button type="button" class="danger" id="unlock-btn">Usuń grupy i odblokuj listę</button>
       </div>
       <div class="error" id="pool-error" role="alert"></div>
     </section>
@@ -339,7 +381,7 @@
     <div id="pools-list"></div>
 
     <section class="panel">
-      <h2>Ranking wszystkich pul</h2>
+      <h2>Ranking wszystkich grup</h2>
       <div class="count" id="standings-note"></div>
       <div class="table-wrap">
         <table>
@@ -349,7 +391,7 @@
               <th>Nazwisko</th>
               <th>Imię</th>
               <th>Klub</th>
-              <th>Pula</th>
+              <th>Grupa</th>
               <th class="num">V</th>
               <th class="num">M</th>
               <th class="num">V/M</th>
@@ -361,7 +403,75 @@
           </thead>
           <tbody id="standings-rows"></tbody>
         </table>
-        <div class="empty" id="standings-empty" hidden>Brak pul. Utwórz je powyżej.</div>
+        <div class="empty" id="standings-empty" hidden>Brak grup. Utwórz je powyżej.</div>
+      </div>
+    </section>
+
+    <section class="panel" id="approval-panel" hidden>
+      <h2>Zatwierdzenie grup</h2>
+      <div class="muted" id="approval-note"></div>
+      <div class="actions">
+        <button type="button" class="primary" id="approve-btn">Wszystkie grupy zatwierdzone</button>
+      </div>
+      <div id="approved-options" hidden>
+        <div id="round2-box">
+          <h3>Opcja A: druga tura grup</h3>
+          <div class="muted">Wszyscy zawodnicy są ponownie dzieleni na grupy wężem według rankingu po grupach z pierwszej tury.</div>
+          <div class="grid">
+            <label>Rozmiar grupy
+              <input id="round2-size" type="number" min="2" step="1">
+            </label>
+            <label>Górny limit plansz na grupę
+              <input id="round2-boards" type="number" min="1" max="20" step="1" value="1">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="round2-btn">Utwórz drugą turę grup</button>
+          </div>
+        </div>
+        <div id="bracket-create-box">
+          <h3>Opcja B: drabinka direct elimination</h3>
+          <div class="muted">Zawodnicy są rozstawieni według rankingu po grupach. Gdy ich liczba nie jest potęgą dwójki, najniżej rozstawieni grają dobijaki, a najwyżej rozstawieni dostają wolny los.</div>
+          <div class="grid">
+            <label>Liczba zawodników w drabince
+              <input id="bracket-count" type="number" min="2" step="1">
+            </label>
+          </div>
+          <div class="actions">
+            <button type="button" class="primary" id="bracket-btn">Utwórz drabinkę</button>
+          </div>
+        </div>
+        <div class="muted" id="bracket-exists" hidden>Drabinka została utworzona (karta Drabinka).</div>
+        <div class="actions">
+          <button type="button" id="unapprove-btn">Cofnij zatwierdzenie</button>
+        </div>
+      </div>
+      <div class="error" id="approval-error" role="alert"></div>
+      <details id="rounds-archive" hidden>
+        <summary id="rounds-archive-title">Ranking po 1. turze</summary>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Miejsce</th><th>Zawodnik</th><th>Klub</th><th>Grupa</th>
+                <th class="num">V</th><th class="num">M</th><th class="num">V/M</th>
+                <th class="num">TS</th><th class="num">TR</th><th class="num">Ind</th>
+              </tr>
+            </thead>
+            <tbody id="rounds-archive-rows"></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </div>
+  <div id="view-bracket" role="tabpanel" hidden>
+    <section class="panel">
+      <h2>Drabinka direct elimination</h2>
+      <div class="muted" id="bracket-info"></div>
+      <div class="error" id="bracket-error" role="alert"></div>
+      <div id="bracket-box"></div>
+      <div class="actions" id="bracket-actions" hidden>
+        <button type="button" class="danger" id="bracket-delete-btn">Usuń drabinkę</button>
       </div>
     </section>
   </div>
@@ -417,11 +527,16 @@
   var regHint = document.getElementById('reg-hint');
   var regError = document.getElementById('reg-error');
   var rankingMeta = document.getElementById('ranking-meta');
-  var rankingUrlInput = document.getElementById('ranking-url');
-  var rankingFetchBtn = document.getElementById('ranking-fetch-btn');
-  var rankingPasteBox = document.getElementById('ranking-paste-box');
-  var rankingText = document.getElementById('ranking-text');
-  var rankingPasteBtn = document.getElementById('ranking-paste-btn');
+  var rankingFile = document.getElementById('ranking-file');
+  var rankingFileBtn = document.getElementById('ranking-file-btn');
+  var previewBox = document.getElementById('ranking-preview-box');
+  var previewFilter = document.getElementById('ranking-filter');
+  var previewMeta = document.getElementById('ranking-preview-meta');
+  var previewBody = document.getElementById('ranking-preview-body');
+  var skippedBox = document.getElementById('ranking-skipped-box');
+  var skippedTitle = document.getElementById('ranking-skipped-title');
+  var skippedList = document.getElementById('ranking-skipped');
+  var rankingPreview = null;
   var rankingError = document.getElementById('ranking-error');
   var rankingOk = document.getElementById('ranking-ok');
   var personalPanel = document.getElementById('personal-panel');
@@ -430,12 +545,40 @@
   var personalUrl = document.getElementById('personal-url');
   var personalClose = document.getElementById('personal-close');
 
-  // --- elementy: pule ---
+  // --- elementy: grupy ---
   var tabFencers = document.getElementById('tab-fencers');
   var tabPools = document.getElementById('tab-pools');
+  var tabBracket = document.getElementById('tab-bracket');
+  var viewBracket = document.getElementById('view-bracket');
+  var approvalPanel = document.getElementById('approval-panel');
+  var approvalNote = document.getElementById('approval-note');
+  var approveBtn = document.getElementById('approve-btn');
+  var approvedOptions = document.getElementById('approved-options');
+  var round2Box = document.getElementById('round2-box');
+  var round2SizeInput = document.getElementById('round2-size');
+  var round2BoardsInput = document.getElementById('round2-boards');
+  var round2Btn = document.getElementById('round2-btn');
+  var bracketCreateBox = document.getElementById('bracket-create-box');
+  var bracketCountInput = document.getElementById('bracket-count');
+  var bracketBtn = document.getElementById('bracket-btn');
+  var bracketExists = document.getElementById('bracket-exists');
+  var unapproveBtn = document.getElementById('unapprove-btn');
+  var approvalError = document.getElementById('approval-error');
+  var roundsArchive = document.getElementById('rounds-archive');
+  var roundsArchiveTitle = document.getElementById('rounds-archive-title');
+  var roundsArchiveRows = document.getElementById('rounds-archive-rows');
+  var bracketInfo = document.getElementById('bracket-info');
+  var bracketError = document.getElementById('bracket-error');
+  var bracketBox = document.getElementById('bracket-box');
+  var bracketActions = document.getElementById('bracket-actions');
+  var bracketDeleteBtn = document.getElementById('bracket-delete-btn');
+  var bracket = null;
+  var archivedRounds = [];
+  var DE_THRESHOLD = 15;
   var viewFencers = document.getElementById('view-fencers');
   var viewPools = document.getElementById('view-pools');
   var poolSizeInput = document.getElementById('pool-size');
+  var poolSizeTouched = false;
   var boardsDefaultInput = document.getElementById('boards-default');
   var poolCountInfo = document.getElementById('pool-count-info');
   var poolCreateBox = document.getElementById('pool-create');
@@ -444,6 +587,9 @@
   var advanceInput = document.getElementById('advance-count');
   var poolLockNotice = document.getElementById('pool-lock-notice');
   var unlockBtn = document.getElementById('unlock-btn');
+  var newTournamentBtn = document.getElementById('new-tournament-btn');
+  var newTournamentError = document.getElementById('new-tournament-error');
+  var newTournamentOk = document.getElementById('new-tournament-ok');
   var poolError = document.getElementById('pool-error');
   var poolsList = document.getElementById('pools-list');
   var standingsNote = document.getElementById('standings-note');
@@ -516,6 +662,8 @@
     registrationOpen = data.registrationOpen;
     rankingInfo = data.ranking;
     lanUrl = data.lanUrl || '';
+    bracket = data.bracket || null;
+    archivedRounds = data.rounds || [];
   }
 
   function loadState() {
@@ -550,8 +698,14 @@
       registrationOpen = data.registrationOpen;
       rankingInfo = data.ranking;
       lanUrl = data.lanUrl || lanUrl;
+      var bracketChanged = JSON.stringify(data.bracket || null) !== JSON.stringify(bracket);
+      var roundsChanged = JSON.stringify(data.rounds || []) !== JSON.stringify(archivedRounds);
+      bracket = data.bracket || null;
+      archivedRounds = data.rounds || [];
       if (fencersChanged || metaChanged) render();
       syncPools(data.pools, true);
+      if (bracketChanged && !bracketBox.contains(document.activeElement)) renderBracket();
+      if (bracketChanged || roundsChanged) renderApproval();
     }).catch(function () { /* chwilowy brak połączenia, spróbujemy za chwilę */ });
   }
 
@@ -585,7 +739,7 @@
       firstName: firstNameInput.value.trim().replace(/\s+/g, ' '),
       club: clubInput.value.trim().replace(/\s+/g, ' '),
       country: countryInput.value.trim().toLocaleUpperCase('pl') || 'POL',
-      ranking: Number(rankingInput.value)
+      ranking: rankingInput.value.trim() === '' ? null : Number(rankingInput.value)
     };
   }
 
@@ -593,13 +747,13 @@
   function validateFencer(data) {
     if (!data.lastName) return 'Podaj nazwisko.';
     if (!data.firstName) return 'Podaj imię.';
-    if (!Number.isInteger(data.ranking) || data.ranking < 1 || data.ranking > 9999) {
-      return 'Ranking musi być liczbą całkowitą od 1 do 9999.';
+    if (data.ranking !== null && (!Number.isInteger(data.ranking) || data.ranking < 1 || data.ranking > 9999)) {
+      return 'Ranking musi być liczbą całkowitą od 1 do 9999 albo pusty.';
     }
 
     var others = fencers.filter(function (f) { return f.id !== editingId; });
 
-    if (data.ranking !== UNRANKED) {
+    if (data.ranking !== null && data.ranking !== UNRANKED) {
       var sameRanking = others.find(function (f) { return f.ranking === data.ranking; });
       if (sameRanking) {
         return 'Ranking ' + data.ranking + ' jest już przypisany do: ' +
@@ -725,7 +879,7 @@
     event.preventDefault();
     clearError();
     if (isLocked()) {
-      showError('Lista jest zablokowana, bo pule są utworzone.');
+      showError('Lista jest zablokowana, bo grupy są utworzone.');
       return;
     }
 
@@ -784,7 +938,7 @@
     regToggle.textContent = registrationOpen ? 'Zamknij zapisy' : 'Otwórz zapisy';
     regToggle.disabled = isLocked();
     regHint.textContent = isLocked()
-      ? 'Zapisy zamknęły się automatycznie po utworzeniu pul.'
+      ? 'Zapisy zamknęły się automatycznie po utworzeniu grup.'
       : 'Zawodnicy skanują kod i wpisują imię oraz nazwisko. Telefony muszą być w tej samej sieci Wi-Fi co ten komputer.';
   }
 
@@ -822,33 +976,78 @@
     }
   }
 
-  function importRanking(path, body, button) {
-    rankingError.classList.remove('show');
-    rankingOk.hidden = true;
-    button.disabled = true;
-    return api('POST', path, body).then(function (res) {
-      rankingOk.textContent = 'Wczytano ' + res.count + ' zawodników z klasyfikacji. ' +
-        'Zaktualizowano ranking ' + res.updated + ' zapisanych zawodników.';
-      rankingOk.hidden = false;
-      return loadState();
-    }).catch(function (e) {
-      rankingError.textContent = e.message;
-      rankingError.classList.add('show');
-      if (e.status === 422) rankingPasteBox.open = true;
-    }).then(function () {
-      button.disabled = false;
-    });
+  function showRankingError(message) {
+    rankingError.textContent = message;
+    rankingError.classList.add('show');
   }
 
-  rankingFetchBtn.addEventListener('click', function () {
-    importRanking('/api/admin/ranking/fetch', { url: rankingUrlInput.value.trim() }, rankingFetchBtn);
+  function renderPreview() {
+    previewBody.textContent = '';
+    if (!rankingPreview) return;
+    var q = normalizeName(previewFilter.value);
+    var shown = 0;
+    rankingPreview.entries.forEach(function (e) {
+      if (q && normalizeName(e.name + ' ' + e.club).indexOf(q) === -1) return;
+      shown++;
+      var tr = document.createElement('tr');
+      appendCell(tr, String(e.place));
+      appendCell(tr, e.name);
+      appendCell(tr, e.club);
+      appendCell(tr, e.fencer);
+      previewBody.appendChild(tr);
+    });
+    previewMeta.textContent = 'Wczytano ' + rankingPreview.entries.length + ' zawodników, widocznych ' + shown + '.';
+    var skipped = rankingPreview.skipped;
+    skippedBox.hidden = skipped.length === 0;
+    skippedTitle.textContent = 'Pominięte wiersze (' + skipped.length + '): nie rozpoznano miejsca lub nazwiska';
+    skippedList.textContent = skipped.join('\n');
+  }
+
+  function loadPreview() {
+    return api('GET', '/api/admin/ranking/entries').then(function (data) {
+      rankingPreview = data;
+      renderPreview();
+    }).catch(function (e) { showRankingError(e.message); });
+  }
+
+  previewBox.addEventListener('toggle', function () { if (previewBox.open) loadPreview(); });
+  previewFilter.addEventListener('input', renderPreview);
+
+  // z zapisanej strony wysyłamy tylko tabele (bez skryptów i reszty strony)
+  function tablesOnly(htmlText) {
+    var doc = new DOMParser().parseFromString(htmlText, 'text/html');
+    return Array.prototype.map.call(doc.querySelectorAll('table'), function (t) { return t.outerHTML; }).join('\n');
+  }
+
+  rankingFileBtn.addEventListener('click', function () {
+    rankingError.classList.remove('show');
+    rankingOk.hidden = true;
+    var file = rankingFile.files[0];
+    if (!file) return showRankingError('Wybierz plik z klasyfikacją.');
+    if (file.size > 30 * 1024 * 1024) return showRankingError('Plik jest za duży (limit 30 MB).');
+    var reader = new FileReader();
+    reader.onerror = function () { showRankingError('Nie udało się odczytać pliku.'); };
+    reader.onload = function () {
+      var text = tablesOnly(String(reader.result));
+      if (text.length > 1.5 * 1024 * 1024) return showRankingError('Tabele w pliku są za duże (limit 1,5 MB).');
+      rankingFileBtn.disabled = true;
+      api('POST', '/api/admin/ranking/file', { filename: file.name, text: text }).then(function (res) {
+        rankingOk.textContent = 'Wczytano ' + res.count + ' zawodników z klasyfikacji' +
+          (res.skipped ? ' (pominięto wierszy: ' + res.skipped + ', zobacz podgląd)' : '') + '. ' +
+          'Zaktualizowano ranking ' + res.updated + ' zapisanych zawodników.';
+        rankingOk.hidden = false;
+        previewBox.open = true;
+        return loadState().then(loadPreview);
+      }).catch(function (e) {
+        showRankingError(e.message);
+      }).then(function () {
+        rankingFileBtn.disabled = false;
+      });
+    };
+    reader.readAsText(file);
   });
 
-  rankingPasteBtn.addEventListener('click', function () {
-    importRanking('/api/admin/ranking/paste', { text: rankingText.value }, rankingPasteBtn);
-  });
-
-  // ================= PULE =================
+  // ================= GRUPY =================
 
   function showPoolError(message) {
     poolError.textContent = message;
@@ -860,7 +1059,7 @@
     poolError.classList.remove('show');
   }
 
-  // Tworzenie i usuwanie pul. Walki (tury, plansze, sędziów) układa serwer, więc odpowiedź zawiera gotowe pule.
+  // Tworzenie i usuwanie grup. Walki (tury, plansze, sędziów) układa serwer, więc odpowiedź zawiera gotowe grupy.
   // Wyniki wpisuje się osobnymi zapytaniami, bo zawodnicy zapisują je też z telefonów.
   function putPools(request) {
     return api('PUT', '/api/admin/pools', request).then(function (res) {
@@ -877,11 +1076,11 @@
     return state.groups.length > 0;
   }
 
-  // Algorytm "węża": zawodnicy posortowani po rankingu idą do pul 1..P, potem z powrotem P..1.
+  // Algorytm "węża": zawodnicy posortowani po rankingu idą do grup 1..P, potem z powrotem P..1.
   function snakeDistribute(sortedIds, poolCount) {
     var groups = [];
     for (var p = 0; p < poolCount; p++) {
-      groups.push({ name: 'Pula ' + (p + 1), fencerIds: [], bouts: [] });
+      groups.push({ name: 'Grupa ' + (p + 1), fencerIds: [], bouts: [] });
     }
     sortedIds.forEach(function (id, i) {
       var row = Math.floor(i / poolCount);
@@ -902,7 +1101,7 @@
       return;
     }
     if (!Number.isInteger(size) || size < 2 || size > fencers.length) {
-      showPoolError('Rozmiar puli musi być liczbą całkowitą od 2 do ' + fencers.length + '.');
+      showPoolError('Rozmiar grupy musi być liczbą całkowitą od 2 do ' + fencers.length + '.');
       return;
     }
 
@@ -915,7 +1114,7 @@
 
     var boards = Number(boardsDefaultInput.value);
     if (!Number.isInteger(boards) || boards < 1 || boards > MAX_BOARDS) {
-      showPoolError('Liczba plansz na pulę musi być liczbą od 1 do ' + MAX_BOARDS + '.');
+      showPoolError('Górny limit plansz na grupę musi być liczbą od 1 do ' + MAX_BOARDS + '.');
       return;
     }
 
@@ -928,10 +1127,34 @@
     if (saved) renderAll();
   }
 
+  async function newTournament() {
+    newTournamentError.classList.remove('show');
+    newTournamentOk.hidden = true;
+    if (!window.confirm('Rozpocząć nowy turniej? Zawodnicy, grupy i wyniki zostaną usunięte z panelu (kopia trafi do folderu archiwum). Telefony zawodników stracą dostęp do swoich meczów.')) return;
+    newTournamentBtn.disabled = true;
+    try {
+      var res = await api('POST', '/api/admin/tournament/new');
+      poolSizeTouched = false;
+      resetForm();
+      await loadState();
+      newTournamentOk.textContent = res.archive
+        ? 'Nowy turniej rozpoczęty. Kopia poprzedniego: archiwum/' + res.archive + '.'
+        : 'Nowy turniej rozpoczęty (poprzedni był pusty, bez kopii).';
+      newTournamentOk.hidden = false;
+    } catch (e) {
+      newTournamentError.textContent = e.message;
+      newTournamentError.classList.add('show');
+    }
+    newTournamentBtn.disabled = false;
+  }
+
   async function unlockPools() {
-    if (!window.confirm('Usunąć wszystkie pule i wyniki? Lista zawodników zostanie odblokowana (zapisy trzeba otworzyć ręcznie).')) return;
+    if (!window.confirm('Usunąć wszystkie grupy i wyniki? Lista zawodników zostanie odblokowana (zapisy trzeba otworzyć ręcznie).')) return;
     var saved = await putPools({ poolSize: state.poolSize, advanceCount: state.advanceCount, groups: [] });
-    if (saved) renderAll();
+    if (saved) {
+      poolSizeTouched = false;
+      renderAll();
+    }
   }
 
   // Wynik: liczba 0..THRESHOLD, pusty string -> null, błąd -> undefined.
@@ -943,11 +1166,10 @@
     return n;
   }
 
-  // Pełny wynik: zwycięzca ma dokładnie THRESHOLD, przegrany mniej. Wynik częściowy jest dozwolony, ale się nie liczy.
+  // Pełny wynik: zwycięzca ma więcej trafień (maksymalnie THRESHOLD, może mniej, np. 4:3 na czas). Wynik częściowy jest dozwolony, ale się nie liczy.
   function validateBout(sa, sb) {
     if (sa === null || sb === null) return null;
-    if (sa === THRESHOLD && sb === THRESHOLD) return 'Oba wyniki nie mogą wynosić ' + THRESHOLD + '.';
-    if (sa !== THRESHOLD && sb !== THRESHOLD) return 'Zwycięzca musi mieć dokładnie ' + THRESHOLD + ' trafień.';
+    if (sa === sb) return 'Wynik nie może być remisem, ktoś musi wygrać.';
     return null;
   }
 
@@ -977,6 +1199,17 @@
   }
 
   // Organizator potwierdza wynik zgłoszony jako błędny (wynik bez zmian, znika oznaczenie błędu).
+  async function approveEdit(gi, k) {
+    clearPoolError();
+    var bout = state.groups[gi].bouts[k];
+    try {
+      var res = await api('POST', '/api/admin/bout/approve-edit', { id: bout.id });
+      syncPools(res.pools, true);
+    } catch (e) {
+      showPoolError(e.message);
+    }
+  }
+
   async function confirmBout(gi, k) {
     clearPoolError();
     var bout = state.groups[gi].bouts[k];
@@ -1004,7 +1237,7 @@
     clearPoolError();
     var boards = Number(value);
     if (!Number.isInteger(boards) || boards < 1 || boards > MAX_BOARDS) {
-      showPoolError('Liczba plansz musi być liczbą od 1 do ' + MAX_BOARDS + '.');
+      showPoolError('Górny limit plansz musi być liczbą od 1 do ' + MAX_BOARDS + '.');
       return;
     }
     try {
@@ -1027,7 +1260,7 @@
     }
   }
 
-  // Statystyki puli: V, M, TS, TR, Ind, V/M. Liczą się tylko pełne wyniki.
+  // Statystyki grupy: V, M, TS, TR, Ind, V/M. Liczą się tylko pełne wyniki.
   function poolStats(group) {
     var byId = {};
     var list = group.fencerIds.map(function (id) {
@@ -1090,7 +1323,42 @@
     if (!b || b.sa === null || b.sb === null) return { text: '', cls: '' };
     var mine = b.a === x ? b.sa : b.sb;
     var theirs = b.a === x ? b.sb : b.sa;
-    return mine > theirs ? { text: 'V' + mine, cls: 'win' } : { text: 'D' + mine, cls: 'lose' };
+    if (mine > theirs) return { text: mine === THRESHOLD ? 'V' : 'V' + mine, cls: 'win' };
+    return { text: 'D' + mine, cls: 'lose' };
+  }
+
+  // Ręczne przeniesienie zawodnika do innej grupy (możliwe, dopóki w obu grupach nie ma wyników)
+  function buildMoveSelect(gi, fencerId, f) {
+    var select = document.createElement('select');
+    select.className = 'move-select';
+    select.setAttribute('aria-label', 'Przenieś ' + fencerLabel(f) + ' do innej grupy');
+    select.style.marginLeft = '8px';
+    var hint = document.createElement('option');
+    hint.value = '';
+    hint.textContent = 'Przenieś do…';
+    select.appendChild(hint);
+    state.groups.forEach(function (other, oi) {
+      if (oi === gi) return;
+      var option = document.createElement('option');
+      option.value = String(oi);
+      option.textContent = other.name;
+      select.appendChild(option);
+    });
+    select.addEventListener('change', function () { if (select.value !== '') moveFencer(fencerId, Number(select.value)); });
+    return select;
+  }
+
+  async function moveFencer(fencerId, toIndex) {
+    clearPoolError();
+    try {
+      var res = await api('POST', '/api/admin/group/move', { fencer: fencerId, to: toIndex });
+      state = res.pools;
+      renderPools();
+      renderStandings();
+    } catch (e) {
+      showPoolError(e.message);
+      renderPools();
+    }
   }
 
   function buildMatrix(gi) {
@@ -1120,7 +1388,10 @@
       var st = byId[id];
       var tr = document.createElement('tr');
       appendCell(tr, String(i + 1), 'center');
-      appendCell(tr, fencerLabel(f));
+      var nameCell = document.createElement('td');
+      nameCell.appendChild(document.createTextNode(fencerLabel(f)));
+      if (state.groups.length > 1) nameCell.appendChild(buildMoveSelect(gi, id, f));
+      tr.appendChild(nameCell);
       g.fencerIds.forEach(function (otherId, j) {
         if (i === j) {
           var diag = document.createElement('td');
@@ -1213,7 +1484,7 @@
       row.appendChild(nameB);
 
       var item = document.createElement('div');
-      item.className = 'bout-item' + (b.disputed ? ' disputed' : '');
+      item.className = 'bout-item' + (b.disputed ? ' disputed' : '') + (b.editRequested ? ' edit-request' : '');
       item.appendChild(row);
       item.appendChild(buildBoutMeta(gi, k));
       wrap.appendChild(item);
@@ -1240,7 +1511,7 @@
     g.fencerIds.forEach(function (id) { members[id] = true; });
     [true, false].forEach(function (fromPool) {
       var group = document.createElement('optgroup');
-      group.label = fromPool ? 'Z tej puli' : 'Inni zawodnicy';
+      group.label = fromPool ? 'Z tej grupy' : 'Inni zawodnicy';
       fencers.slice().sort(bySeed).forEach(function (f) {
         if (!!members[f.id] !== fromPool || f.id === b.a || f.id === b.b) return;
         var option = document.createElement('option');
@@ -1269,6 +1540,16 @@
     } else if (b.by) {
       note('wpisał: ' + fencerLabel(fencerById(b.by)));
     }
+    if (b.editRequested && !b.disputed) {
+      note('✎ prośba o poprawę wyniku: ' + fencerLabel(fencerById(b.by)), 'warn');
+      var approve = document.createElement('button');
+      approve.type = 'button';
+      approve.textContent = 'Zatwierdź poprawę';
+      approve.addEventListener('click', function () { approveEdit(gi, k); });
+      meta.appendChild(approve);
+    } else if (b.editApproved) {
+      note('poprawa zatwierdzona, czeka na zawodnika');
+    }
     if (b.disputed) {
       note('⚠ zgłoszony błąd, decyduje organizator', 'warn');
       var confirm = document.createElement('button');
@@ -1285,7 +1566,7 @@
       (poolComplete(g) ? ' — zakończona' : '') + (g.closed ? ' — zamknięta' : '');
   }
 
-  // Nagłówek puli: tytuł, plansze, zamknięcie puli i ostrzeżenia z układu walk.
+  // Nagłówek grupy: tytuł, plansze, zamknięcie grupy i ostrzeżenia z układu walk.
   function buildPoolHead(gi) {
     var g = state.groups[gi];
     var head = document.createElement('div');
@@ -1300,23 +1581,23 @@
     var boardsLabel = document.createElement('label');
     boardsLabel.style.flexDirection = 'row';
     boardsLabel.style.alignItems = 'center';
-    boardsLabel.appendChild(document.createTextNode('Plansze'));
+    boardsLabel.appendChild(document.createTextNode('Górny limit plansz'));
     var boardsInput = document.createElement('input');
     boardsInput.type = 'number';
     boardsInput.className = 'score';
     boardsInput.min = '1';
     boardsInput.max = String(MAX_BOARDS);
     boardsInput.value = String(g.boards);
-    boardsInput.setAttribute('aria-label', 'Liczba plansz w ' + g.name);
+    boardsInput.setAttribute('aria-label', 'Górny limit plansz w ' + g.name);
     boardsLabel.appendChild(boardsInput);
     var boardsBtn = document.createElement('button');
     boardsBtn.type = 'button';
-    boardsBtn.textContent = 'Ustaw plansze';
+    boardsBtn.textContent = 'Ustaw limit plansz';
     boardsBtn.addEventListener('click', function () { setBoards(gi, boardsInput.value); });
     var closeBtn = document.createElement('button');
     closeBtn.type = 'button';
-    closeBtn.textContent = g.closed ? 'Otwórz pulę' : 'Zamknij pulę';
-    closeBtn.title = 'Zamknięta pula nie przyjmuje wyników z telefonów';
+    closeBtn.textContent = g.closed ? 'Otwórz grupę' : 'Zamknij grupę';
+    closeBtn.title = 'Zamknięta grupa nie przyjmuje wyników z telefonów';
     closeBtn.addEventListener('click', function () { setClosed(gi, !g.closed); });
     controls.appendChild(boardsLabel);
     controls.appendChild(boardsBtn);
@@ -1327,15 +1608,15 @@
     info.className = 'muted pool-info';
     var from = g.boardOffset + 1;
     var to = g.boardOffset + g.boardsUsed;
-    var lines = ['Plansze: ' + (from === to ? from : from + '–' + to) + '.'];
+    var lines = ['Użyte plansze: ' + (from === to ? from : from + '–' + to) + '.'];
     if (g.warnings.boardsReduced) {
-      lines.push('Za mało zawodników na ' + g.boards + ' plansz, używam ' + g.boardsUsed + '.');
+      lines.push('Górny limit: ' + g.boards + ' plansz. Używam ' + g.boardsUsed + ', bo każda walka potrzebuje sędziego z grupy.');
     }
     if (g.warnings.noRest) {
       lines.push('Walk bez przerwy: ' + g.warnings.noRest + ' (oznaczone przy walkach).');
     }
     if (g.warnings.noReferee) {
-      lines.push('Walk bez sędziego: ' + g.warnings.noReferee + ' (wskaż sędziego ręcznie, także z innych pul).');
+      lines.push('Walk bez sędziego: ' + g.warnings.noReferee + ' (wskaż sędziego ręcznie, także z innych grup).');
     }
     info.textContent = lines.join(' ');
     head.appendChild(info);
@@ -1354,7 +1635,7 @@
     box.appendChild(buildMatrix(gi));
   }
 
-  // Odświeża listę walk puli (np. po wynikach z telefonów), chyba że ktoś właśnie w niej pisze.
+  // Odświeża listę walk grupy (np. po wynikach z telefonów), chyba że ktoś właśnie w niej pisze.
   function redrawBouts(gi) {
     var box = poolsList.querySelector('[data-bouts="' + gi + '"]');
     if (!box) return;
@@ -1370,7 +1651,7 @@
     }));
   }
 
-  // Wprowadza nowy stan pul z serwera. Gdy zmienił się tylko układ wyników, odświeża tylko potrzebne części.
+  // Wprowadza nowy stan grup z serwera. Gdy zmienił się tylko układ wyników, odświeża tylko potrzebne części.
   function syncPools(newPools, redrawBoutLists) {
     var previousStructure = poolsStructure(state);
     var previous = JSON.stringify(state);
@@ -1393,7 +1674,7 @@
     if (!isLocked()) {
       var empty = document.createElement('div');
       empty.className = 'empty';
-      empty.textContent = 'Brak pul. Ustaw rozmiar puli i kliknij „Utwórz pule”.';
+      empty.textContent = 'Brak grup. Ustaw rozmiar grupy i kliknij „Utwórz grupy”.';
       poolsList.appendChild(empty);
       return;
     }
@@ -1467,7 +1748,7 @@
     if (complete) {
       standingsNote.textContent = 'Awansuje ' + advance + ' z ' + all.length + ' zawodników.';
     } else {
-      standingsNote.textContent = 'Status awansu pojawi się po zakończeniu wszystkich pul.';
+      standingsNote.textContent = 'Status awansu pojawi się po zakończeniu wszystkich grup.';
     }
   }
 
@@ -1492,7 +1773,363 @@
     } else if (advanceInput.value === '') {
       advanceInput.value = String(Math.floor(fencers.length * 0.8));
     }
-    if (!locked) updatePoolCountInfo();
+    if (!locked) {
+      // domyślnie jedna grupa (rozmiar = liczba zawodników), a pola nie mogą przekroczyć liczby zawodników
+      var total = fencers.length;
+      poolSizeInput.max = String(total);
+      advanceInput.max = String(total);
+      if (document.activeElement !== poolSizeInput && (!poolSizeTouched || Number(poolSizeInput.value) > total)) {
+        poolSizeInput.value = String(total);
+      }
+      if (document.activeElement !== advanceInput && Number(advanceInput.value) > total) {
+        advanceInput.value = String(total);
+      }
+      updatePoolCountInfo();
+    }
+    viewPools.classList.toggle('frozen', !!state.approved);
+    renderApproval();
+  }
+
+  // ---------- zatwierdzenie grup, druga tura, drabinka ----------
+
+  function showApprovalError(message) {
+    approvalError.textContent = message;
+    approvalError.classList.add('show');
+  }
+
+  function renderApproval() {
+    var locked = isLocked();
+    approvalPanel.hidden = !locked;
+    if (!locked) return;
+    var total = fencers.length;
+    var allDone = state.groups.every(poolComplete);
+    var open = state.groups.some(function (g) {
+      return g.bouts.some(function (b) { return b.disputed || b.editRequested; });
+    });
+    approveBtn.hidden = !!state.approved;
+    approveBtn.disabled = !allDone || open;
+    if (state.approved) {
+      approvalNote.textContent = 'Tura ' + (state.round || 1) + ': grupy zatwierdzone. Wybierz, co dalej.';
+    } else if (!allDone) {
+      approvalNote.textContent = 'Przycisk będzie aktywny, gdy wszystkie walki w grupach mają wyniki.';
+    } else if (open) {
+      approvalNote.textContent = 'Rozstrzygnij zgłoszone błędy i prośby o poprawę wyniku.';
+    } else {
+      approvalNote.textContent = 'Wszystkie walki mają wyniki. Zatwierdź grupy, żeby przejść dalej.';
+    }
+    approvedOptions.hidden = !state.approved;
+    round2Box.hidden = (state.round || 1) >= 2 || !!bracket;
+    bracketCreateBox.hidden = !!bracket;
+    bracketExists.hidden = !bracket;
+    unapproveBtn.hidden = !!bracket;
+    round2SizeInput.max = String(total);
+    bracketCountInput.max = String(total);
+    if (document.activeElement !== round2SizeInput && round2SizeInput.value === '') {
+      round2SizeInput.value = String(Math.max(2, Math.min(total, state.poolSize || 5)));
+    }
+    if (document.activeElement !== bracketCountInput && bracketCountInput.value === '') {
+      var suggested = state.advanceCount === null ? Math.floor(total * 0.8) : state.advanceCount;
+      bracketCountInput.value = String(Math.max(2, Math.min(total, suggested)));
+    }
+
+    roundsArchive.hidden = archivedRounds.length === 0;
+    roundsArchiveRows.textContent = '';
+    if (archivedRounds.length) {
+      var archived = archivedRounds[0];
+      roundsArchiveTitle.textContent = 'Ranking po ' + archived.round + '. turze';
+      archived.standings.forEach(function (r) {
+        var tr = document.createElement('tr');
+        appendCell(tr, r.place, 'center');
+        appendCell(tr, r.name);
+        appendCell(tr, r.club || '—');
+        appendCell(tr, r.pool);
+        appendCell(tr, String(r.V), 'num');
+        appendCell(tr, String(r.M), 'num');
+        appendCell(tr, r.VM, 'num');
+        appendCell(tr, String(r.TS), 'num');
+        appendCell(tr, String(r.TR), 'num');
+        appendCell(tr, (r.Ind > 0 ? '+' : '') + r.Ind, 'num');
+        roundsArchiveRows.appendChild(tr);
+      });
+    }
+  }
+
+  async function approvalAction(button, path, body, after) {
+    approvalError.classList.remove('show');
+    button.disabled = true;
+    try {
+      await api('POST', path, body);
+      await loadState();
+      if (after) after();
+    } catch (e) {
+      showApprovalError(e.message);
+    }
+    button.disabled = false;
+    renderApproval();
+  }
+
+  approveBtn.addEventListener('click', function () {
+    if (!window.confirm('Zatwierdzić wszystkie grupy? Wyniki zostaną zamrożone (można cofnąć zatwierdzenie).')) return;
+    approvalAction(approveBtn, '/api/admin/groups/approve', { approved: true });
+  });
+  unapproveBtn.addEventListener('click', function () {
+    approvalAction(unapproveBtn, '/api/admin/groups/approve', { approved: false });
+  });
+  round2Btn.addEventListener('click', function () {
+    var size = Number(round2SizeInput.value);
+    var boards = Number(round2BoardsInput.value);
+    if (!window.confirm('Utworzyć drugą turę grup? Wyniki pierwszej tury zostaną zapisane jako ranking po 1. turze.')) return;
+    approvalAction(round2Btn, '/api/admin/round2', { poolSize: size, boards: boards }, function () {
+      round2SizeInput.value = '';
+      poolSizeTouched = false;
+    });
+  });
+  bracketBtn.addEventListener('click', function () {
+    var count = Number(bracketCountInput.value);
+    approvalAction(bracketBtn, '/api/admin/bracket', { count: count }, function () { showView('bracket'); });
+  });
+
+  // ---------- drabinka ----------
+
+  function deRoundTitle(round, index) {
+    var inRound = bracket.size / Math.pow(2, index);
+    if (index === 0 && bracket.count < bracket.size) return 'Dobijaki (tabela ' + bracket.size + ')';
+    if (inRound === 2) return 'Finał';
+    if (inRound === 4) return 'Półfinały';
+    if (inRound === 8) return 'Ćwierćfinały';
+    return 'Tabela ' + inRound;
+  }
+
+  function seedOf(id) {
+    var i = bracket.seeds.indexOf(id);
+    return i === -1 ? '' : '#' + (i + 1);
+  }
+
+  function parseDeScore(value) {
+    var text = value.trim();
+    if (text === '') return null;
+    var n = Number(text);
+    if (!Number.isInteger(n) || n < 0 || n > DE_THRESHOLD) return undefined;
+    return n;
+  }
+
+  async function onDeScore(boutId, aInput, bInput) {
+    bracketError.classList.remove('show');
+    var sa = parseDeScore(aInput.value);
+    var sb = parseDeScore(bInput.value);
+    if (sa === undefined || sb === undefined) {
+      bracketError.textContent = 'Wynik musi być liczbą całkowitą od 0 do ' + DE_THRESHOLD + '.';
+      bracketError.classList.add('show');
+      return;
+    }
+    if (sa !== null && sb !== null && sa === sb) {
+      bracketError.textContent = 'Wynik nie może być remisem, ktoś musi wygrać.';
+      bracketError.classList.add('show');
+      return;
+    }
+    try {
+      await api('PUT', '/api/admin/bracket/bout', { id: boutId, sa: sa, sb: sb });
+    } catch (e) {
+      bracketError.textContent = e.message;
+      bracketError.classList.add('show');
+    }
+    await loadState();
+  }
+
+  var DE_ROW_PX = 96;
+  var DE_COL_PX = 212;
+
+  // Karta jednej walki; number to numer walki w drabince, hints to opisy pustych miejsc.
+  function buildDeBout(b, title, hints) {
+    var card = document.createElement('div');
+    card.className = 'de-bout';
+    var head = document.createElement('div');
+    head.className = 'de-title';
+    head.textContent = title;
+    card.appendChild(head);
+    var inputs = [];
+    var rows = {};
+    ['a', 'b'].forEach(function (side) {
+      var id = b[side];
+      var row = document.createElement('div');
+      row.className = 'de-row' + (b.winner && b.winner === id ? ' win' : '') + (!id ? ' empty-slot' : '');
+      var seed = document.createElement('span');
+      seed.className = 'de-seed';
+      seed.textContent = id ? seedOf(id) : '';
+      var name = document.createElement('span');
+      name.className = 'de-name';
+      name.textContent = id ? fencerLabel(fencerById(id)) : (b.bye ? 'wolny los' : (hints[side] || '—'));
+      if (id) name.title = fencerLabel(fencerById(id));
+      row.appendChild(seed);
+      row.appendChild(name);
+      if (!b.bye) {
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = String(DE_THRESHOLD);
+        input.step = '1';
+        input.disabled = !(b.a && b.b);
+        var score = side === 'a' ? b.sa : b.sb;
+        input.value = score === null ? '' : String(score);
+        input.setAttribute('aria-label', 'Trafienia: ' + (id ? fencerLabel(fencerById(id)) : ''));
+        inputs.push(input);
+        row.appendChild(input);
+      }
+      card.appendChild(row);
+      rows[side] = row;
+    });
+    if (inputs.length === 2) {
+      inputs.forEach(function (input) {
+        input.addEventListener('change', function () { onDeScore(b.id, inputs[0], inputs[1]); });
+      });
+    }
+    card._rows = rows;
+    return card;
+  }
+
+  // Linie ze strzałkami: z prawej strony walki do miejsca (górny/dolny wiersz) w walce następnej rundy.
+  function drawBracketLines(grid, cards) {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'de-lines');
+    svg.setAttribute('width', String(grid.scrollWidth));
+    svg.setAttribute('height', String(grid.scrollHeight));
+    var defs = document.createElementNS(NS, 'defs');
+    ['', 'won'].forEach(function (kind) {
+      var marker = document.createElementNS(NS, 'marker');
+      marker.setAttribute('id', 'de-arrow' + kind);
+      marker.setAttribute('class', kind);
+      marker.setAttribute('viewBox', '0 0 10 10');
+      marker.setAttribute('refX', '9');
+      marker.setAttribute('refY', '5');
+      marker.setAttribute('markerWidth', '7');
+      marker.setAttribute('markerHeight', '7');
+      marker.setAttribute('orient', 'auto');
+      var tip = document.createElementNS(NS, 'path');
+      tip.setAttribute('d', 'M0,0 L10,5 L0,10 z');
+      marker.appendChild(tip);
+      defs.appendChild(marker);
+    });
+    svg.appendChild(defs);
+
+    var box = grid.getBoundingClientRect();
+    function rel(el) {
+      var r = el.getBoundingClientRect();
+      return { left: r.left - box.left, right: r.right - box.left, mid: r.top - box.top + r.height / 2 };
+    }
+    for (var r = 0; r < cards.length - 1; r++) {
+      cards[r].forEach(function (card, i) {
+        var target = cards[r + 1][i >> 1];
+        var from = rel(card);
+        var to = rel(target._rows[i % 2 === 0 ? 'a' : 'b']);
+        var mid = from.right + (to.left - from.right) / 2;
+        var path = document.createElementNS(NS, 'path');
+        var won = !!card._winner;
+        path.setAttribute('d', 'M' + from.right + ',' + from.mid + ' H' + mid + ' V' + to.mid + ' H' + (to.left - 1));
+        path.setAttribute('marker-end', 'url(#de-arrow' + (won ? 'won' : '') + ')');
+        if (won) path.setAttribute('class', 'won');
+        svg.appendChild(path);
+      });
+    }
+    grid.appendChild(svg);
+  }
+
+  function renderBracket() {
+    bracketBox.textContent = '';
+    bracketError.classList.remove('show');
+    bracketActions.hidden = !bracket;
+    if (!bracket) {
+      bracketInfo.textContent = '';
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'Drabinka nie jest utworzona. Zatwierdź grupy w karcie Grupy i wybierz opcję drabinki.';
+      bracketBox.appendChild(empty);
+      return;
+    }
+    var rounds = bracket.rounds;
+    var final = rounds[rounds.length - 1][0];
+    var info = 'Drabinka: ' + bracket.count + ' zawodników, tabela ' + bracket.size + '.';
+    if (final.winner) info += ' Zwycięzca: ' + fencerLabel(fencerById(final.winner)) + '.';
+    bracketInfo.textContent = info;
+
+    // numery walk (bez wolnych losów)
+    var numbers = [];
+    var n = 0;
+    rounds.forEach(function (round) {
+      numbers.push(round.map(function (b) { return b.bye ? null : ++n; }));
+    });
+    var thirdNumber = bracket.third ? ++n : null;
+
+    var base = rounds[0].length;
+    var extra = bracket.third ? 1 : 0;
+    var scroll = document.createElement('div');
+    scroll.className = 'de-scroll';
+    var grid = document.createElement('div');
+    grid.className = 'de-grid';
+    grid.style.gridTemplateColumns = 'repeat(' + rounds.length + ', ' + DE_COL_PX + 'px)';
+    grid.style.gridTemplateRows = '32px repeat(' + (base + extra) + ', ' + DE_ROW_PX + 'px)';
+
+    var cards = [];
+    rounds.forEach(function (round, r) {
+      var head = document.createElement('div');
+      head.className = 'de-head';
+      head.style.gridColumn = String(r + 1);
+      head.style.gridRow = '1';
+      head.textContent = deRoundTitle(round, r);
+      grid.appendChild(head);
+
+      var span = Math.pow(2, r);
+      cards.push(round.map(function (b, i) {
+        var hints = {};
+        if (r > 0) {
+          ['a', 'b'].forEach(function (side, k) {
+            var feeder = numbers[r - 1][2 * i + k];
+            if (feeder) hints[side] = 'Zwycięzca walki ' + feeder;
+          });
+        }
+        var slot = document.createElement('div');
+        slot.className = 'de-slot';
+        slot.style.gridColumn = String(r + 1);
+        slot.style.gridRow = (2 + i * span) + ' / span ' + span;
+        var card = buildDeBout(b, numbers[r][i] ? 'Walka ' + numbers[r][i] : '', hints);
+        card._winner = !!b.winner;
+        slot.appendChild(card);
+        grid.appendChild(slot);
+        return card;
+      }));
+    });
+    if (bracket.third) {
+      var semis = numbers[rounds.length - 2];
+      var slot3 = document.createElement('div');
+      slot3.className = 'de-slot';
+      slot3.style.gridColumn = String(rounds.length);
+      slot3.style.gridRow = String(2 + base);
+      slot3.appendChild(buildDeBout(bracket.third, 'Walka o 3. miejsce (walka ' + thirdNumber + ')', {
+        a: 'Przegrany walki ' + semis[0], b: 'Przegrany walki ' + semis[1]
+      }));
+      grid.appendChild(slot3);
+    }
+    scroll.appendChild(grid);
+    bracketBox.appendChild(scroll);
+    requestAnimationFrame(function () {
+      if (grid.isConnected && !viewBracket.hidden) drawBracketLines(grid, cards);
+    });
+  }
+
+  bracketDeleteBtn.addEventListener('click', async function () {
+    if (!window.confirm('Usunąć drabinkę wraz z wynikami?')) return;
+    try {
+      await api('POST', '/api/admin/bracket/delete');
+      await loadState();
+      showView('pools');
+    } catch (e) {
+      bracketError.textContent = e.message;
+      bracketError.classList.add('show');
+    }
+  });
+
+  function clampToFencers(input) {
+    if (input.value !== '' && Number(input.value) > fencers.length) input.value = String(fencers.length);
   }
 
   function updatePoolCountInfo() {
@@ -1501,7 +2138,7 @@
       poolCountInfo.textContent = '';
       return;
     }
-    poolCountInfo.textContent = 'Liczba pul: ' + Math.ceil(fencers.length / size);
+    poolCountInfo.textContent = 'Liczba grup: ' + Math.ceil(fencers.length / size);
   }
 
   async function onAdvanceChange() {
@@ -1522,13 +2159,14 @@
   }
 
   function showView(name) {
-    var isFencers = name === 'fencers';
-    viewFencers.hidden = !isFencers;
-    viewPools.hidden = isFencers;
-    tabFencers.classList.toggle('active', isFencers);
-    tabPools.classList.toggle('active', !isFencers);
-    tabFencers.setAttribute('aria-selected', String(isFencers));
-    tabPools.setAttribute('aria-selected', String(!isFencers));
+    viewFencers.hidden = name !== 'fencers';
+    viewPools.hidden = name !== 'pools';
+    viewBracket.hidden = name !== 'bracket';
+    [[tabFencers, 'fencers'], [tabPools, 'pools'], [tabBracket, 'bracket']].forEach(function (pair) {
+      pair[0].classList.toggle('active', pair[1] === name);
+      pair[0].setAttribute('aria-selected', String(pair[1] === name));
+    });
+    if (name === 'bracket') renderBracket();
   }
 
   function render() {
@@ -1543,13 +2181,21 @@
     renderPools();
     renderStandings();
     updatePoolControls();
+    renderBracket();
   }
 
   tabFencers.addEventListener('click', function () { showView('fencers'); });
   tabPools.addEventListener('click', function () { showView('pools'); });
-  poolSizeInput.addEventListener('input', updatePoolCountInfo);
+  tabBracket.addEventListener('click', function () { showView('bracket'); });
+  poolSizeInput.addEventListener('input', function () {
+    poolSizeTouched = true;
+    clampToFencers(poolSizeInput);
+    updatePoolCountInfo();
+  });
+  advanceInput.addEventListener('input', function () { clampToFencers(advanceInput); });
   createPoolsBtn.addEventListener('click', createPools);
   unlockBtn.addEventListener('click', unlockPools);
+  newTournamentBtn.addEventListener('click', newTournament);
   advanceInput.addEventListener('change', onAdvanceChange);
 
   if (pin) {
@@ -1559,5 +2205,6 @@
   }
 })();
 </script>
+<script src="/static/i18n.js"></script>
 </body>
 </html>

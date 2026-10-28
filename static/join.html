@@ -132,6 +132,17 @@
   .ref-item { font-size: 0.95rem; padding: 8px 0; border-bottom: 1px solid var(--border); }
   .ref-item:last-child { border-bottom: 0; }
   .ref-item.done { color: var(--muted); }
+  .table-wrap { overflow-x: auto; margin: 0 -4px; }
+  table.grid { border-collapse: collapse; width: 100%; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  table.grid th, table.grid td { padding: 6px 6px; border-bottom: 1px solid var(--border); text-align: center; white-space: nowrap; }
+  table.grid th { color: var(--muted); font-weight: 600; }
+  table.grid td.name, table.grid th.name { text-align: left; }
+  table.grid td.win { color: var(--ok-text); background: var(--ok-bg); }
+  table.grid td.lose { color: var(--error-text); background: var(--error-bg); }
+  table.grid td.diag { background: var(--border); }
+  table.grid tr.me td.name { font-weight: 700; }
+  table.grid tr.me { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .results-actions { margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -171,7 +182,7 @@
         <dt>Zawodnik</dt><dd id="p-name"></dd>
         <dt>Klub</dt><dd id="p-club"></dd>
         <dt>Ranking</dt><dd id="p-ranking"></dd>
-        <dt id="p-pool-label" hidden>Pula</dt><dd id="p-pool" hidden></dd>
+        <dt id="p-pool-label" hidden>Grupa</dt><dd id="p-pool" hidden></dd>
       </dl>
       <p class="muted">Ten telefon jest Twoim kluczem do zapisu. Nie czyść danych przeglądarki. Jeśli stracisz dostęp, poproś organizatora o osobisty kod QR.</p>
     </section>
@@ -184,6 +195,19 @@
     <section class="panel" id="matches-panel" hidden>
       <h2>Twoje mecze</h2>
       <div id="matches"></div>
+    </section>
+
+    <section class="panel" id="results-panel" hidden>
+      <h2 id="results-title">Wyniki Twojej grupy</h2>
+      <p class="muted">Sprawdź swoje wyniki. Jeśli coś się nie zgadza, zgłoś to organizatorowi.</p>
+      <div class="table-wrap"><table class="grid" id="results-table"></table></div>
+      <div class="results-actions">
+        <button type="button" class="secondary" id="ranking-btn">Pokaż ranking wszystkich grup</button>
+      </div>
+      <div id="ranking-box" hidden>
+        <p class="muted" id="ranking-note"></p>
+        <div class="table-wrap"><table class="grid" id="ranking-table"></table></div>
+      </div>
     </section>
 
     <section class="panel" id="refereeing-panel" hidden>
@@ -222,6 +246,14 @@
   var nextBox = document.getElementById('next-box');
   var matchesPanel = document.getElementById('matches-panel');
   var matchesBox = document.getElementById('matches');
+  var resultsPanel = document.getElementById('results-panel');
+  var resultsTitle = document.getElementById('results-title');
+  var resultsTable = document.getElementById('results-table');
+  var rankingBtn = document.getElementById('ranking-btn');
+  var rankingBox = document.getElementById('ranking-box');
+  var rankingNote = document.getElementById('ranking-note');
+  var rankingTable = document.getElementById('ranking-table');
+  var rankingOpen = false;
   var refereeingPanel = document.getElementById('refereeing-panel');
   var refereeingBox = document.getElementById('refereeing');
   var waitingPanel = document.getElementById('waiting-panel');
@@ -322,12 +354,18 @@
       card.appendChild(el('div', 'warn', 'Zgłoszono błąd w tym wyniku. Decyduje organizator.'));
     }
     if (b.closed) {
-      card.appendChild(el('div', 'line muted', 'Pula jest zamknięta. Wynik wpisuje organizator.'));
+      card.appendChild(el('div', 'line muted', 'Grupa jest zamknięta. Wynik wpisuje organizator.'));
     }
 
     var message = el('div', 'error');
     message.hidden = true;
 
+    if (b.editRequested) {
+      card.appendChild(el('div', 'line muted', 'Prośba o poprawę wysłana. Czekasz na decyzję organizatora.'));
+    }
+    if (b.canEnter && b.hasResult) {
+      card.appendChild(el('div', 'line', 'Organizator zatwierdził poprawę. Możesz zmienić wynik (jeden raz).'));
+    }
     if (b.canEnter) {
       var scoreForm = el('form', 'score-form');
       scoreForm.noValidate = true;
@@ -378,6 +416,22 @@
       card.appendChild(scoreForm);
     }
 
+    if (b.canRequestEdit) {
+      var requestEdit = el('button', 'secondary', 'Poproś o zgodę na poprawę wyniku');
+      requestEdit.type = 'button';
+      requestEdit.addEventListener('click', function () {
+        requestEdit.disabled = true;
+        post('/api/bout/request-edit', { token: token, id: b.id })
+          .then(function (view) { render(view, false); })
+          .catch(function (e) {
+            message.textContent = e.message;
+            message.hidden = false;
+            requestEdit.disabled = false;
+          });
+      });
+      card.appendChild(requestEdit);
+    }
+
     if (b.canDispute) {
       var dispute = el('button', 'secondary', 'Zgłoś błąd w wyniku');
       dispute.type = 'button';
@@ -396,6 +450,74 @@
     card.appendChild(message);
     return card;
   }
+
+  function row(table, cells) {
+    var tr = document.createElement('tr');
+    cells.forEach(function (c) {
+      var td = document.createElement(c.th ? 'th' : 'td');
+      if (c.cls) td.className = c.cls;
+      td.textContent = c.text;
+      tr.appendChild(td);
+    });
+    table.appendChild(tr);
+    return tr;
+  }
+
+  function renderPoolResults(results) {
+    resultsPanel.hidden = !results;
+    resultsTable.textContent = '';
+    if (!results) {
+      rankingOpen = false;
+      rankingBox.hidden = true;
+      rankingBtn.textContent = 'Pokaż ranking wszystkich grup';
+      return;
+    }
+    resultsTitle.textContent = 'Wyniki Twojej grupy (' + results.pool + ')';
+    var head = [{ text: '#', th: true }, { text: 'Zawodnik', th: true, cls: 'name' }];
+    results.rows.forEach(function (_, j) { head.push({ text: String(j + 1), th: true }); });
+    ['V', 'V/M', 'TS', 'TR', 'Ind', 'Msc'].forEach(function (h) { head.push({ text: h, th: true }); });
+    row(resultsTable, head);
+    results.rows.forEach(function (r, i) {
+      var cells = [{ text: String(i + 1) }, { text: r.name, cls: 'name' }];
+      r.cells.forEach(function (c) {
+        cells.push(c === null ? { text: '', cls: 'diag' } : { text: c.text, cls: c.win ? 'win' : 'lose' });
+      });
+      cells.push({ text: String(r.V) }, { text: r.VM }, { text: String(r.TS) }, { text: String(r.TR) },
+        { text: (r.Ind > 0 ? '+' : '') + r.Ind }, { text: r.place });
+      var tr = row(resultsTable, cells);
+      if (r.me) tr.className = 'me';
+    });
+    if (rankingOpen) loadRanking();
+  }
+
+  function loadRanking() {
+    return post('/api/me/ranking', { token: token }).then(function (data) {
+      rankingTable.textContent = '';
+      row(rankingTable, ['Msc', 'Zawodnik', 'Klub', 'Grupa', 'V', 'M', 'V/M', 'TS', 'TR', 'Ind', 'Awans'].map(function (h, i) {
+        return { text: h, th: true, cls: (i === 1 || i === 2) ? 'name' : '' };
+      }));
+      data.rows.forEach(function (r) {
+        var tr = row(rankingTable, [
+          { text: r.place }, { text: r.name, cls: 'name' }, { text: r.club || '—', cls: 'name' }, { text: r.pool },
+          { text: String(r.V) }, { text: String(r.M) }, { text: r.VM }, { text: String(r.TS) }, { text: String(r.TR) },
+          { text: (r.Ind > 0 ? '+' : '') + r.Ind }, { text: r.advance ? 'Awans' : '' }
+        ]);
+        if (r.me) tr.className = 'me';
+      });
+      rankingNote.textContent = data.complete
+        ? 'Wszystkie grupy zakończone. Awansuje ' + data.advanceCount + ' zawodników.'
+        : 'Nie wszystkie grupy są jeszcze zakończone, ranking może się zmienić. Status awansu pojawi się po zakończeniu wszystkich grup.';
+    }).catch(function (e) {
+      rankingNote.textContent = e.message;
+    });
+  }
+
+  rankingBtn.addEventListener('click', function () {
+    rankingOpen = !rankingOpen;
+    rankingBox.hidden = !rankingOpen;
+    rankingBtn.textContent = rankingOpen ? 'Ukryj ranking wszystkich grup' : 'Pokaż ranking wszystkich grup';
+    if (rankingOpen) loadRanking();
+  });
 
   function render(view, isNew) {
     var f = view.fencer;
@@ -421,6 +543,8 @@
     if (view.bouts.length === 1 && next) matchesPanel.hidden = true;
     matchesPanel.querySelector('h2').textContent = next ? 'Pozostałe mecze' : 'Twoje mecze';
 
+    renderPoolResults(view.poolResults);
+
     refereeingPanel.hidden = view.refereeing.length === 0;
     refereeingBox.textContent = '';
     view.refereeing.forEach(function (r) {
@@ -434,10 +558,10 @@
       waitingPanel.hidden = false;
       waitingText.textContent = hasPool
         ? 'Nie masz przydzielonych meczów.'
-        : 'Mecze pojawią się tutaj, gdy organizator utworzy pule. Ta strona odświeża się sama.';
+        : 'Mecze pojawią się tutaj, gdy organizator utworzy grupy. Ta strona odświeża się sama.';
     } else if (!next && view.bouts.length > 0 && view.bouts.every(function (b) { return b.hasResult; })) {
       waitingPanel.hidden = false;
-      waitingText.textContent = 'Wszystkie Twoje mecze w puli są rozegrane. Dziękujemy!';
+      waitingText.textContent = 'Wszystkie Twoje mecze w grupie są rozegrane. Dziękujemy!';
     } else {
       waitingPanel.hidden = true;
     }
@@ -453,7 +577,7 @@
     });
   }
 
-  // Odświeżanie: nowy wynik przeciwnika, kolejny mecz, zamknięta pula. Nie nadpisujemy formularza, w którym ktoś pisze.
+  // Odświeżanie: nowy wynik przeciwnika, kolejny mecz, zamknięta grupa. Nie nadpisujemy formularza, w którym ktoś pisze.
   function poll() {
     if (!token || document.hidden || sections.profile.hidden) return;
     var active = document.activeElement;
@@ -531,5 +655,6 @@
   init();
 })();
 </script>
+<script src="/static/i18n.js"></script>
 </body>
 </html>

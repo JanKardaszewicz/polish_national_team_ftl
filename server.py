@@ -12,6 +12,7 @@ import copy
 import hmac
 import json
 import os
+import random
 import re
 import secrets
 import socket
@@ -19,9 +20,8 @@ import sys
 import threading
 import time
 import unicodedata
-import urllib.error
-import urllib.request
 import uuid
+from fractions import Fraction
 from html.parser import HTMLParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -36,11 +36,11 @@ ADMIN_PIN = os.environ.get('ADMIN_PIN') or '{:06d}'.format(secrets.randbelow(100
 
 UNRANKED = 999            # ranking zawodnika spoza klasyfikacji (najniższy)
 MAX_PLACE = UNRANKED - 1  # miejsca z klasyfikacji muszą być wyższe niż UNRANKED
-THRESHOLD = 5             # trafienia w walce w puli
+THRESHOLD = 5             # trafienia w walce w grupie
 MAX_BOARDS = 20
+DE_THRESHOLD = 15         # trafienia w walce drabinki direct elimination
 MAX_BODY = 2 * 1024 * 1024
 MAX_FENCERS = 2000
-ALLOWED_RANKING_HOSTS = {'pzszerm.pl', 'www.pzszerm.pl'}
 PIN_FAIL_LIMIT = 10
 PIN_FAIL_WINDOW = 60.0
 
@@ -48,6 +48,7 @@ STATIC_FILES = {
     '/admin': ('admin.html', 'text/html; charset=utf-8'),
     '/join': ('join.html', 'text/html; charset=utf-8'),
     '/static/qrcode.js': ('qrcode.js', 'application/javascript; charset=utf-8'),
+    '/static/i18n.js': ('i18n.js', 'application/javascript; charset=utf-8'),
 }
 
 
@@ -118,130 +119,127 @@ class _TableParser(HTMLParser):
 
 
 def _entries_from_rows(rows):
-    """rows: lista wierszy (lista komórek). Zwraca wpisy klasyfikacji albo [] gdy brak nagłówka 'Miejsce'."""
+    """rows: lista wierszy (lista komórek). Zwraca (wpisy, pominięte wiersze); brak nagłówka 'Miejsce' daje ([], [])."""
     header_index = None
     for i, row in enumerate(rows):
         if any(fold(cell).startswith('miejsce') for cell in row):
             header_index = i
             break
     if header_index is None:
-        return []
+        return [], []
     header = [fold(cell) for cell in rows[header_index]]
     place_col = next(i for i, h in enumerate(header) if h.startswith('miejsce'))
     name_col = next((i for i, h in enumerate(header) if 'nazwisko' in h), place_col + 1)
     club_col = next((i for i, h in enumerate(header) if h == 'klub'), None)
 
-    entries = []
+    entries, skipped = [], []
     for row in rows[header_index + 1:]:
-        if len(row) <= max(place_col, name_col):
-            continue
-        match = re.match(r'\s*(\d+)', row[place_col])
-        name = clean(row[name_col])
+        match = re.match(r'\s*(\d+)', row[place_col]) if len(row) > max(place_col, name_col) else None
+        name = clean(row[name_col]) if match else ''
         key = name_key(name)
-        if not match or not key:
-            continue
-        place = int(match.group(1))
-        if not 1 <= place <= MAX_PLACE:
+        place = int(match.group(1)) if match else 0
+        if not match or not key or not 1 <= place <= MAX_PLACE:
+            text = ' | '.join(c for c in (clean(c) for c in row) if c)
+            if text:
+                skipped.append(text[:200])
             continue
         club = clean(row[club_col]) if club_col is not None and club_col < len(row) else ''
         entries.append({'place': place, 'name': name, 'club': club, 'key': key})
-    return entries
+    return entries, skipped
 
 
 def parse_ranking_html(html):
+    """Zwraca (wpisy, pominięte wiersze) z pierwszej tabeli z nagłówkiem 'Miejsce'."""
     parser = _TableParser()
     parser.feed(html)
     for table in parser.tables:
-        entries = _entries_from_rows(table)
+        entries, skipped = _entries_from_rows(table)
         if entries:
-            return entries
-    return []
-
-
-def parse_ranking_text(text):
-    """Tabela skopiowana ze strony (komórki oddzielone tabulatorami)."""
-    rows = [line.split('\t') for line in text.splitlines() if line.strip()]
-    entries = _entries_from_rows(rows)
-    if entries:
-        return entries
-    # brak nagłówka w wklejonym tekście: zakładamy kolejność Miejsce, Imię i Nazwisko, Rocznik, Klub
-    entries = []
-    for row in rows:
-        if len(row) < 2:
-            continue
-        match = re.match(r'\s*(\d+)', row[0])
-        name = clean(row[1])
-        key = name_key(name)
-        if not match or not key or not 1 <= int(match.group(1)) <= MAX_PLACE:
-            continue
-        club = clean(row[3]) if len(row) > 3 else ''
-        entries.append({'place': int(match.group(1)), 'name': name, 'club': club, 'key': key})
-    return entries
-
-
-def check_ranking_url(url):
-    parsed = urlparse(url)
-    if parsed.scheme != 'https' or parsed.hostname not in ALLOWED_RANKING_HOSTS \
-            or parsed.username or parsed.password or parsed.port not in (None, 443):
-        raise ApiError(400, 'Dozwolone są tylko adresy https://pzszerm.pl/...')
-
-
-class _HostCheckingRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        check_ranking_url(newurl)
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-BLOCKED_MESSAGE = (
-    'Strona PZSzerm nie oddała tabeli serwerowi (wymaga przeglądarki z JavaScript i cookies). '
-    'Serwer nie obchodzi tej weryfikacji. Otwórz link w przeglądarce, skopiuj całą tabelę '
-    'klasyfikacji (od nagłówka „Miejsce”) i wklej ją w polu poniżej.'
-)
-
-
-def fetch_ranking(url):
-    check_ranking_url(url)
-    request = urllib.request.Request(url, headers={
-        'User-Agent': 'TurniejApp/1.0 (narzedzie organizatora)',
-        'Accept': 'text/html',
-    })
-    opener = urllib.request.build_opener(_HostCheckingRedirect)
-    try:
-        with opener.open(request, timeout=15) as response:
-            body = response.read(MAX_BODY + 1)
-    except urllib.error.HTTPError as e:
-        raise ApiError(502, 'PZSzerm odpowiedział błędem {}.'.format(e.code))
-    except (urllib.error.URLError, OSError) as e:
-        raise ApiError(502, 'Nie udało się pobrać strony: {}'.format(getattr(e, 'reason', e)))
-    if len(body) > MAX_BODY:
-        raise ApiError(502, 'Odpowiedź PZSzerm jest zbyt duża.')
-    entries = parse_ranking_html(body.decode('utf-8', errors='replace'))
-    if not entries:
-        raise ApiError(422, BLOCKED_MESSAGE)
-    return entries
+            return entries, skipped[:200]
+    return [], []
 
 
 # ---------- walki ----------
 
 def validate_scores(sa, sb):
-    """None albo liczby 0..THRESHOLD; pełny wynik: zwycięzca dokładnie THRESHOLD, przegrany mniej."""
+    """None albo liczby 0..THRESHOLD; pełny wynik: różne liczby (zwycięzca ma więcej, może mniej niż THRESHOLD, np. 4:3 na czas)."""
     for s in (sa, sb):
         if s is not None and (not is_int(s) or not 0 <= s <= THRESHOLD):
             raise ApiError(400, 'Wynik musi być liczbą całkowitą od 0 do {}.'.format(THRESHOLD))
-    if sa is not None and sb is not None and (sa == sb or max(sa, sb) != THRESHOLD):
-        raise ApiError(400, 'Zwycięzca musi mieć dokładnie {} trafień.'.format(THRESHOLD))
+    if sa is not None and sb is not None and sa == sb:
+        raise ApiError(400, 'Wynik nie może być remisem, ktoś musi wygrać.')
 
 
 def has_result(bout):
     return bout['sa'] is not None and bout['sb'] is not None
 
 
+def pool_stats(fencer_ids, bouts):
+    """V, M, TS, TR dla każdego zawodnika grupy (tylko walki z pełnym wynikiem)."""
+    stats = {fid: {'id': fid, 'V': 0, 'M': 0, 'TS': 0, 'TR': 0} for fid in fencer_ids}
+    for b in bouts:
+        if not has_result(b):
+            continue
+        a, c = stats[b['a']], stats[b['b']]
+        a['M'] += 1
+        c['M'] += 1
+        a['TS'] += b['sa']
+        a['TR'] += b['sb']
+        c['TS'] += b['sb']
+        c['TR'] += b['sa']
+        (a if b['sa'] > b['sb'] else c)['V'] += 1
+    return list(stats.values())
+
+
+def rank_stats(rows):
+    """Sortuje po V/M, wskaźniku (TS-TR), TS; remisy mają wspólne miejsce (etykieta np. '3T')."""
+    for r in rows:
+        r['Ind'] = r['TS'] - r['TR']
+        r['VM'] = Fraction(r['V'], r['M']) if r['M'] else Fraction(0)
+    key = lambda r: (-r['VM'], -r['Ind'], -r['TS'])
+    rows = sorted(rows, key=key)
+    place = 0
+    for i, r in enumerate(rows):
+        if i == 0 or key(rows[i - 1]) != key(r):
+            place = i + 1
+        r['place'] = place
+    counts = {}
+    for r in rows:
+        counts[r['place']] = counts.get(r['place'], 0) + 1
+    for r in rows:
+        r['label'] = '{}T'.format(r['place']) if counts[r['place']] > 1 else str(r['place'])
+    return rows
+
+
+def bracket_order(size):
+    """Kolejność rozstawienia w drabince o rozmiarze size (potęga 2): [1, 8, 4, 5, 2, 7, 3, 6] dla 8."""
+    order = [1, 2]
+    while len(order) < size:
+        n = len(order) * 2
+        order = [x for seed in order for x in (seed, n + 1 - seed)]
+    return order[:size]
+
+
+def snake_groups(ids, count):
+    groups = [[] for _ in range(count)]
+    for i, fid in enumerate(ids):
+        row, col = divmod(i, count)
+        groups[col if row % 2 == 0 else count - 1 - col].append(fid)
+    return groups
+
+
+def pool_complete(group):
+    return all(has_result(b) for b in group['bouts'])
+
+
 def default_data():
     return {
         'registrationOpen': True,
-        'ranking': {'entries': [], 'source': '', 'importedAt': None},
+        'ranking': {'entries': [], 'skipped': [], 'source': '', 'importedAt': None},
         'fencers': [],
-        'pools': {'poolSize': 7, 'advanceCount': None, 'groups': []},
+        'pools': {'poolSize': 7, 'advanceCount': None, 'groups': [], 'approved': False, 'round': 1},
+        'rounds': [],      # zarchiwizowane tury grup (ranking po turze)
+        'bracket': None,   # drabinka direct elimination
     }
 
 
@@ -270,6 +268,8 @@ class Store:
     @staticmethod
     def _upgrade(data):
         """Uzupełnia pola, których nie było w starszych plikach danych."""
+        data['pools'].setdefault('approved', False)
+        data['pools'].setdefault('round', 1)
         for g in data['pools'].get('groups', []):
             g.setdefault('boards', 1)
             g.setdefault('boardsUsed', 1)
@@ -278,6 +278,8 @@ class Store:
                 b.setdefault('id', new_id())
                 b.setdefault('by', None)
                 b.setdefault('disputed', False)
+                b.setdefault('editRequested', False)
+                b.setdefault('editApproved', False)
                 b.setdefault('turn', i + 1)
                 b.setdefault('slot', 1)
                 b.setdefault('ref', None)
@@ -296,7 +298,7 @@ class Store:
 
     def _require_unlocked(self):
         if self._pools_locked():
-            raise ApiError(423, 'Lista zawodników jest zablokowana, bo pule są utworzone.')
+            raise ApiError(423, 'Lista zawodników jest zablokowana, bo grupy są utworzone.')
 
     def _used_rankings(self, exclude_id=None):
         return {f['ranking'] for f in self.data['fencers']
@@ -335,6 +337,18 @@ class Store:
             raise ApiError(400, 'Nazwa klubu może mieć maksymalnie 80 znaków.')
         return club
 
+    def _auto_ranking(self, key, club, exclude_id):
+        """Ranking i klub z zaimportowanej klasyfikacji PZSzerm; zwraca (ranking, źródło, klub)."""
+        entry, source = self._lookup(key)
+        ranking = UNRANKED
+        if entry:
+            if entry['place'] in self._used_rankings(exclude_id):
+                source = 'conflict'
+            else:
+                ranking = entry['place']
+            club = entry['club'] or club
+        return ranking, source, club
+
     def _fencer(self, fencer_id):
         return next((f for f in self.data['fencers'] if f['id'] == fencer_id), None)
 
@@ -353,14 +367,7 @@ class Store:
             club = self._read_club(club)
             self._check_duplicate(key, None)
 
-            entry, source = self._lookup(key)
-            ranking = UNRANKED
-            if entry:
-                if entry['place'] in self._used_rankings():
-                    source = 'conflict'
-                else:
-                    ranking = entry['place']
-                club = entry['club'] or club
+            ranking, source, club = self._auto_ranking(key, club, None)
 
             fencer = {
                 'id': new_id(),
@@ -395,6 +402,10 @@ class Store:
         if len(country) > 3:
             raise ApiError(400, 'Kraj to kod do 3 liter.')
         ranking = body.get('ranking')
+        if ranking is None:   # puste pole: ranking i klub z klasyfikacji PZSzerm, jak przy zapisie z telefonu
+            self._check_duplicate(key, exclude_id)
+            ranking, source, club = self._auto_ranking(key, club, exclude_id)
+            return first, last, club, country, ranking, source
         if not is_int(ranking) or not 1 <= ranking <= 9999:
             raise ApiError(400, 'Ranking musi być liczbą całkowitą od 1 do 9999.')
         self._check_duplicate(key, exclude_id)
@@ -403,18 +414,18 @@ class Store:
                 if f['id'] != exclude_id and f['ranking'] == ranking:
                     raise ApiError(409, 'Ranking {} jest już przypisany do: {} {}.'.format(
                         ranking, f['lastName'], f['firstName']))
-        return first, last, club, country, ranking
+        return first, last, club, country, ranking, 'manual'
 
     def admin_add(self, body):
         with self.lock:
             self._require_unlocked()
             if len(self.data['fencers']) >= MAX_FENCERS:
                 raise ApiError(403, 'Osiągnięto limit zawodników.')
-            first, last, club, country, ranking = self._read_manual(body, None)
+            first, last, club, country, ranking, source = self._read_manual(body, None)
             self.data['fencers'].append({
                 'id': new_id(),
                 'firstName': first, 'lastName': last, 'club': club, 'country': country,
-                'ranking': ranking, 'rankingSource': 'manual',
+                'ranking': ranking, 'rankingSource': source,
                 'token': secrets.token_urlsafe(16), 'createdAt': time.time(),
             })
             self._save()
@@ -426,9 +437,9 @@ class Store:
             fencer = self._fencer(fencer_id)
             if not fencer:
                 raise ApiError(404, 'Nie ma takiego zawodnika.')
-            first, last, club, country, ranking = self._read_manual(body, fencer_id)
+            first, last, club, country, ranking, source = self._read_manual(body, fencer_id)
             fencer.update({'firstName': first, 'lastName': last, 'club': club,
-                           'country': country, 'ranking': ranking, 'rankingSource': 'manual'})
+                           'country': country, 'ranking': ranking, 'rankingSource': source})
             self._save()
             return self.admin_fencers()
 
@@ -447,31 +458,34 @@ class Store:
     def set_registration(self, is_open):
         with self.lock:
             if is_open and self._pools_locked():
-                raise ApiError(409, 'Pule są utworzone, zapisy nie mogą być otwarte.')
+                raise ApiError(409, 'Grupy są utworzone, zapisy nie mogą być otwarte.')
             self.data['registrationOpen'] = bool(is_open)
             self._save()
             return self.data['registrationOpen']
 
-    # --- pule ---
+    # --- grupy ---
 
     def _club_keys(self):
         return {f['id']: name_key(f['club']) for f in self.data['fencers']}
 
     def set_pools(self, state):
-        """Tworzy pule (podział zawodników przychodzi z panelu, walki układa serwer) albo je usuwa."""
+        """Tworzy grupy (podział zawodników przychodzi z panelu, walki układa serwer) albo je usuwa."""
         with self.lock:
             if not isinstance(state, dict) or not isinstance(state.get('groups'), list):
-                raise ApiError(400, 'Nieprawidłowe dane pul.')
+                raise ApiError(400, 'Nieprawidłowe dane grup.')
             pool_size = state.get('poolSize')
             advance = state.get('advanceCount')
+            total = len(self.data['fencers'])
             if not is_int(pool_size) or not 2 <= pool_size <= 500:
-                raise ApiError(400, 'Nieprawidłowy rozmiar puli.')
-            if advance is not None and (not is_int(advance) or advance < 0):
-                raise ApiError(400, 'Nieprawidłowa liczba awansujących.')
+                raise ApiError(400, 'Nieprawidłowy rozmiar grupy.')
+            if state['groups'] and pool_size > total:
+                raise ApiError(400, 'Rozmiar grupy nie może być większy niż liczba zawodników ({}).'.format(total))
+            if advance is not None and (not is_int(advance) or advance < 0 or (state['groups'] and advance > total)):
+                raise ApiError(400, 'Nieprawidłowa liczba awansujących (maksymalnie {}).'.format(total))
             if len(state['groups']) > 500:
-                raise ApiError(400, 'Zbyt wiele pul.')
+                raise ApiError(400, 'Zbyt wiele grup.')
             if state['groups'] and self._pools_locked():
-                raise ApiError(409, 'Pule już istnieją. Najpierw je usuń.')
+                raise ApiError(409, 'Grupy już istnieją. Najpierw je usuń.')
 
             ids = {f['id'] for f in self.data['fencers']}
             clubs = self._club_keys()
@@ -479,24 +493,28 @@ class Store:
             groups = []
             for g in state['groups']:
                 if not isinstance(g, dict) or not isinstance(g.get('fencerIds'), list):
-                    raise ApiError(400, 'Nieprawidłowa pula.')
+                    raise ApiError(400, 'Nieprawidłowa grupa.')
                 members = g['fencerIds']
                 if len(members) < 2 or any(not isinstance(m, str) or m not in ids or m in used for m in members):
-                    raise ApiError(400, 'Pula musi mieć co najmniej dwóch znanych, niepowtarzających się zawodników.')
+                    raise ApiError(400, 'Grupa musi mieć co najmniej dwóch znanych, niepowtarzających się zawodników.')
                 used.update(members)
+                members = random.sample(members, len(members))  # skład wg rankingu, pozycje w grupie (kolejność walk) losowe
                 boards = g.get('boards', 1)
                 if not is_int(boards) or not 1 <= boards <= MAX_BOARDS:
-                    raise ApiError(400, 'Liczba plansz musi być liczbą od 1 do {}.'.format(MAX_BOARDS))
+                    raise ApiError(400, 'Górny limit plansz musi być liczbą od 1 do {}.'.format(MAX_BOARDS))
                 bouts, boards_used = schedule.build_bouts(list(members), boards, clubs, new_id)
                 groups.append({
-                    'name': clean(g.get('name'))[:40] or 'Pula',
+                    'name': clean(g.get('name'))[:40] or 'Grupa',
                     'fencerIds': list(members),
                     'boards': boards,
                     'boardsUsed': boards_used,
                     'closed': False,
                     'bouts': bouts,
                 })
-            self.data['pools'] = {'poolSize': pool_size, 'advanceCount': advance, 'groups': groups}
+            self.data['pools'] = {'poolSize': pool_size, 'advanceCount': advance, 'groups': groups,
+                                  'approved': False, 'round': 1}
+            self.data['rounds'] = []
+            self.data['bracket'] = None
             if groups:
                 self.data['registrationOpen'] = False
             self._save()
@@ -509,6 +527,10 @@ class Store:
             self.data['pools']['advanceCount'] = advance
             self._save()
 
+    def _require_not_approved(self):
+        if self.data['pools'].get('approved'):
+            raise ApiError(423, 'Grupy są zatwierdzone. Cofnij zatwierdzenie, żeby coś zmienić.')
+
     def _find_bout(self, bout_id):
         if isinstance(bout_id, str):
             for g in self.data['pools']['groups']:
@@ -520,20 +542,23 @@ class Store:
     def _group(self, index):
         groups = self.data['pools']['groups']
         if not is_int(index) or not 0 <= index < len(groups):
-            raise ApiError(404, 'Nie ma takiej puli.')
+            raise ApiError(404, 'Nie ma takiej grupy.')
         return groups[index]
 
     def admin_set_score(self, bout_id, sa, sb):
         with self.lock:
+            self._require_not_approved()
             _g, bout = self._find_bout(bout_id)
             validate_scores(sa, sb)
             bout['sa'], bout['sb'] = sa, sb
             bout['by'] = 'admin' if (sa is not None or sb is not None) else None
             bout['disputed'] = False
+            bout['editRequested'] = bout['editApproved'] = False
             self._save()
 
     def admin_set_referee(self, bout_id, referee_id):
         with self.lock:
+            self._require_not_approved()
             _g, bout = self._find_bout(bout_id)
             if referee_id is not None and not self._fencer(referee_id):
                 raise ApiError(400, 'Nie ma takiego zawodnika.')
@@ -545,13 +570,38 @@ class Store:
 
     def admin_set_boards(self, group_index, boards):
         with self.lock:
+            self._require_not_approved()
             g = self._group(group_index)
             if not is_int(boards) or not 1 <= boards <= MAX_BOARDS:
-                raise ApiError(400, 'Liczba plansz musi być liczbą od 1 do {}.'.format(MAX_BOARDS))
+                raise ApiError(400, 'Górny limit plansz musi być liczbą od 1 do {}.'.format(MAX_BOARDS))
             if any(b['sa'] is not None or b['sb'] is not None for b in g['bouts']):
-                raise ApiError(409, 'W tej puli są już wpisane wyniki. Zmiana plansz zmieniłaby kolejność walk.')
+                raise ApiError(409, 'W tej grupie są już wpisane wyniki. Zmiana plansz zmieniłaby kolejność walk.')
             bouts, boards_used = schedule.build_bouts(g['fencerIds'], boards, self._club_keys(), new_id)
             g['boards'], g['boardsUsed'], g['bouts'] = boards, boards_used, bouts
+            self._save()
+
+    def admin_move_fencer(self, fencer_id, to_index):
+        """Przenosi zawodnika do innej grupy; walki obu grup są układane od nowa (tylko bez wyników)."""
+        with self.lock:
+            self._require_not_approved()
+            target = self._group(to_index)
+            source = next((g for g in self.data['pools']['groups'] if fencer_id in g['fencerIds']), None)
+            if source is None:
+                raise ApiError(404, 'Ten zawodnik nie jest w żadnej grupie.')
+            if source is target:
+                raise ApiError(400, 'Zawodnik jest już w tej grupie.')
+            if len(source['fencerIds']) <= 2:
+                raise ApiError(409, 'W grupie muszą zostać co najmniej dwie osoby.')
+            for g in (source, target):
+                if any(b['sa'] is not None or b['sb'] is not None for b in g['bouts']):
+                    raise ApiError(409, 'W grupie "{}" są już wpisane wyniki. Przeniesienie zmieniłoby kolejność walk.'.format(g['name']))
+            clubs = self._club_keys()
+            source_ids = [x for x in source['fencerIds'] if x != fencer_id]
+            target_ids = list(target['fencerIds'])
+            target_ids.insert(random.randint(0, len(target_ids)), fencer_id)
+            for g, ids in ((source, source_ids), (target, target_ids)):
+                bouts, used = schedule.build_bouts(ids, g['boards'], clubs, new_id)
+                g['fencerIds'], g['bouts'], g['boardsUsed'] = ids, bouts, used
             self._save()
 
     def admin_set_closed(self, group_index, closed):
@@ -576,28 +626,59 @@ class Store:
     def player_score(self, token, bout_id, mine, theirs):
         with self.lock:
             me, g, bout = self._own_bout(token, bout_id)
+            if self.data['pools'].get('approved'):
+                raise ApiError(423, 'Grupy są zatwierdzone. Wynik poprawi organizator.')
             if mine is None or theirs is None:
                 raise ApiError(400, 'Podaj oba wyniki.')
             validate_scores(mine, theirs)
             if g['closed']:
-                raise ApiError(423, 'Pula jest zamknięta. Wynik poprawi organizator.')
+                raise ApiError(423, 'Grupa jest zamknięta. Wynik poprawi organizator.')
             if bout['disputed']:
                 raise ApiError(423, 'Zgłoszono błąd w tym wyniku. Decyduje organizator.')
             if has_result(bout) and bout['by'] != me['id']:
                 raise ApiError(409, 'Wynik wpisał już ktoś inny. Jeśli jest błędny, zgłoś błąd.')
+            if has_result(bout) and not bout['editApproved']:
+                raise ApiError(409, 'Wynik jest już wpisany. Poprawę musi zatwierdzić organizator.')
             if me['id'] == bout['a']:
                 bout['sa'], bout['sb'] = mine, theirs
             else:
                 bout['sa'], bout['sb'] = theirs, mine
             bout['by'] = me['id']
             bout['disputed'] = False
+            bout['editRequested'] = bout['editApproved'] = False
+            self._save()
+
+    def player_request_edit(self, token, bout_id):
+        with self.lock:
+            me, g, bout = self._own_bout(token, bout_id)
+            if self.data['pools'].get('approved'):
+                raise ApiError(423, 'Grupy są zatwierdzone. Wynik poprawi organizator.')
+            if g['closed']:
+                raise ApiError(423, 'Grupa jest zamknięta. Skontaktuj się z organizatorem.')
+            if not has_result(bout) or bout['by'] != me['id']:
+                raise ApiError(409, 'Poprawę możesz zgłosić tylko do wyniku, który sam wpisałeś.')
+            if bout['disputed']:
+                raise ApiError(423, 'Zgłoszono błąd w tym wyniku. Decyduje organizator.')
+            bout['editRequested'] = True
+            self._save()
+
+    def admin_approve_edit(self, bout_id):
+        with self.lock:
+            self._require_not_approved()
+            _g, bout = self._find_bout(bout_id)
+            if not has_result(bout) or bout['by'] in (None, 'admin'):
+                raise ApiError(409, 'Do tej walki nie ma wyniku wpisanego przez zawodnika.')
+            bout['editRequested'] = False
+            bout['editApproved'] = True
             self._save()
 
     def player_dispute(self, token, bout_id):
         with self.lock:
             me, g, bout = self._own_bout(token, bout_id)
+            if self.data['pools'].get('approved'):
+                raise ApiError(423, 'Grupy są zatwierdzone. Wynik poprawi organizator.')
             if g['closed']:
-                raise ApiError(423, 'Pula jest zamknięta. Skontaktuj się z organizatorem.')
+                raise ApiError(423, 'Grupa jest zamknięta. Skontaktuj się z organizatorem.')
             opponent = bout['b'] if me['id'] == bout['a'] else bout['a']
             if not has_result(bout) or bout['by'] != opponent:
                 raise ApiError(409, 'Błąd można zgłosić tylko do wyniku wpisanego przez przeciwnika.')
@@ -612,6 +693,7 @@ class Store:
             groups = self.data['pools']['groups']
             offsets = self._board_offsets()
             by_id = {f['id']: f for f in self.data['fencers']}
+            approved = bool(self.data['pools'].get('approved'))
 
             def label(fid):
                 f = by_id.get(fid)
@@ -622,7 +704,7 @@ class Store:
             refereeing = []
             for gi, g in enumerate(groups):
                 if me['id'] in g['fencerIds'] and pool is None:
-                    pool = {'name': g['name'], 'closed': g['closed']}
+                    pool = {'name': g['name'], 'closed': g['closed'] or approved}
                 my_turns = {b['turn'] for b in g['bouts'] if me['id'] in (b['a'], b['b'])}
                 for b in g['bouts']:
                     board = offsets[gi] + b['slot']
@@ -646,11 +728,16 @@ class Store:
                             'referee': label(b['ref']) if ref else None,
                             'mine': mine if done else None, 'theirs': theirs if done else None,
                             'hasResult': done, 'by': by if done else None,
-                            'disputed': b['disputed'], 'closed': g['closed'],
+                            'disputed': b['disputed'], 'closed': g['closed'] or approved,
                             'noRest': (b['turn'] - 1) in my_turns,
-                            'canEnter': (not g['closed'] and not b['disputed']
-                                         and (not done or b['by'] == me['id'])),
-                            'canDispute': (not g['closed'] and done and not b['disputed']
+                            'editRequested': b['editRequested'] and b['by'] == me['id'],
+                            'editApproved': b['editApproved'] and b['by'] == me['id'],
+                            'canEnter': (not g['closed'] and not approved and not b['disputed']
+                                         and (not done or (b['by'] == me['id'] and b['editApproved']))),
+                            'canRequestEdit': (not g['closed'] and not approved and done and not b['disputed']
+                                               and b['by'] == me['id'] and not b['editRequested']
+                                               and not b['editApproved']),
+                            'canDispute': (not g['closed'] and not approved and done and not b['disputed']
                                            and b['by'] == opponent_id),
                         })
                     if b['ref'] == me['id']:
@@ -664,14 +751,74 @@ class Store:
                 'fencer': {'firstName': me['firstName'], 'lastName': me['lastName'], 'club': me['club'],
                            'ranking': me['ranking'], 'rankingSource': me['rankingSource']},
                 'pool': pool, 'bouts': bouts, 'next': nxt, 'refereeing': refereeing,
+                'poolResults': self._pool_results(me['id'], by_id),
             }
+
+    def _my_group(self, fencer_id):
+        return next((g for g in self.data['pools']['groups'] if fencer_id in g['fencerIds']), None)
+
+    def _pool_results(self, fencer_id, by_id):
+        """Szachownica własnej grupy, dostępna dla zawodnika dopiero po zakończeniu tej grupy."""
+        g = self._my_group(fencer_id)
+        if g is None or not g['bouts'] or not pool_complete(g) or any(b['disputed'] for b in g['bouts']):
+            return None
+        stats = {r['id']: r for r in rank_stats(pool_stats(g['fencerIds'], g['bouts']))}
+        rows = []
+        for x in g['fencerIds']:
+            cells = []
+            for y in g['fencerIds']:
+                if x == y:
+                    cells.append(None)
+                    continue
+                b = next(b for b in g['bouts'] if {b['a'], b['b']} == {x, y})
+                mine, theirs = (b['sa'], b['sb']) if b['a'] == x else (b['sb'], b['sa'])
+                if mine > theirs:
+                    cells.append({'win': True, 'text': 'V' if mine == THRESHOLD else 'V{}'.format(mine)})
+                else:
+                    cells.append({'win': False, 'text': 'D{}'.format(mine)})
+            st = stats[x]
+            f = by_id.get(x, {})
+            rows.append({'name': '{} {}'.format(f.get('lastName', '?'), f.get('firstName', '')).strip(),
+                         'me': x == fencer_id, 'cells': cells, 'V': st['V'], 'M': st['M'],
+                         'VM': '{:.2f}'.format(float(st['VM'])), 'TS': st['TS'], 'TR': st['TR'],
+                         'Ind': st['Ind'], 'place': st['label']})
+        return {'pool': g['name'], 'rows': rows}
+
+    def player_ranking(self, token):
+        """Ranking wszystkich grup; dostępny dla zawodnika po zakończeniu jego grupy."""
+        with self.lock:
+            me = self.find_by_token(token)
+            if not me:
+                raise ApiError(404, 'Nie znaleziono zapisu.')
+            mine = self._my_group(me['id'])
+            if mine is None or not pool_complete(mine):
+                raise ApiError(403, 'Ranking będzie dostępny po zakończeniu Twojej grupy.')
+            by_id = {f['id']: f for f in self.data['fencers']}
+            groups = self.data['pools']['groups']
+            rows = []
+            for g in groups:
+                for st in pool_stats(g['fencerIds'], g['bouts']):
+                    st['pool'] = g['name']
+                    rows.append(st)
+            ranked = rank_stats(rows)
+            complete = all(pool_complete(g) for g in groups)
+            advance = self.data['pools'].get('advanceCount') or 0
+            out = []
+            for i, st in enumerate(ranked):
+                f = by_id.get(st['id'], {})
+                out.append({'place': st['label'], 'name': '{} {}'.format(f.get('lastName', '?'), f.get('firstName', '')).strip(),
+                            'club': f.get('club', ''), 'pool': st['pool'], 'V': st['V'], 'M': st['M'],
+                            'VM': '{:.2f}'.format(float(st['VM'])), 'TS': st['TS'], 'TR': st['TR'], 'Ind': st['Ind'],
+                            'advance': complete and i < advance, 'me': st['id'] == me['id']})
+            return {'rows': out, 'complete': complete, 'advanceCount': advance}
 
     # --- ranking PZSzerm ---
 
-    def import_ranking(self, entries, source):
+    def import_ranking(self, entries, skipped, source):
         with self.lock:
             self.data['ranking'] = {
                 'entries': entries,
+                'skipped': skipped,
                 'source': source,
                 'importedAt': time.time(),
             }
@@ -680,6 +827,20 @@ class Store:
                 updated = self._rematch()
             self._save()
             return updated
+
+    def ranking_preview(self):
+        """Wczytana klasyfikacja do podglądu: kto został dopasowany do zapisanego zawodnika, jakie wiersze pominięto."""
+        with self.lock:
+            ranking = self.data['ranking']
+            by_key = {}
+            for f in self.data['fencers']:
+                by_key.setdefault(name_key(f['firstName'], f['lastName']), []).append(
+                    '{} {}'.format(f['lastName'], f['firstName']))
+            entries = [{'place': e['place'], 'name': e['name'], 'club': e['club'],
+                        'fencer': ', '.join(by_key.get(e['key'], []))}
+                       for e in ranking['entries']]
+            return {'entries': entries, 'skipped': ranking.get('skipped', []),
+                    'source': ranking['source'], 'importedAt': ranking['importedAt']}
 
     def _rematch(self):
         """Przelicza ranking zawodników spoza trybu ręcznego po nowym imporcie."""
@@ -704,10 +865,198 @@ class Store:
             f['ranking'], f['rankingSource'] = ranking, source
         return updated
 
+    # --- zatwierdzenie grup, druga tura, drabinka ---
+
+    def _overall_ranking(self):
+        """Ranking po grupach bieżącej tury; remisy rozstrzyga miejsce w klasyfikacji PZSzerm (do rozstawienia)."""
+        by_id = {f['id']: f for f in self.data['fencers']}
+        rows = []
+        for g in self.data['pools']['groups']:
+            for st in pool_stats(g['fencerIds'], g['bouts']):
+                st['pool'] = g['name']
+                rows.append(st)
+        rows.sort(key=lambda r: (by_id[r['id']]['ranking'], by_id[r['id']]['createdAt']))
+        return rank_stats(rows)
+
+    def _ranking_snapshot(self):
+        by_id = {f['id']: f for f in self.data['fencers']}
+        out = []
+        for r in self._overall_ranking():
+            f = by_id[r['id']]
+            out.append({'place': r['label'], 'name': '{} {}'.format(f['lastName'], f['firstName']),
+                        'club': f['club'], 'pool': r['pool'], 'V': r['V'], 'M': r['M'],
+                        'VM': '{:.2f}'.format(float(r['VM'])), 'TS': r['TS'], 'TR': r['TR'], 'Ind': r['Ind']})
+        return out
+
+    def approve_groups(self, approved):
+        with self.lock:
+            pools = self.data['pools']
+            if not pools['groups']:
+                raise ApiError(409, 'Nie ma utworzonych grup.')
+            if not isinstance(approved, bool):
+                raise ApiError(400, 'Oczekiwano pola approved (true/false).')
+            if approved:
+                bouts = [b for g in pools['groups'] for b in g['bouts']]
+                if not all(has_result(b) for b in bouts):
+                    raise ApiError(409, 'Nie wszystkie walki w grupach mają wyniki.')
+                if any(b['disputed'] or b['editRequested'] for b in bouts):
+                    raise ApiError(409, 'Są walki ze zgłoszonym błędem lub prośbą o poprawę. Rozstrzygnij je przed zatwierdzeniem.')
+            elif self.data['bracket'] is not None:
+                raise ApiError(409, 'Najpierw usuń drabinkę.')
+            pools['approved'] = approved
+            self._save()
+
+    def create_round2(self, pool_size, boards):
+        """Druga tura grup: wszyscy zawodnicy rozdzieleni wężem według rankingu po pierwszej turze."""
+        with self.lock:
+            pools = self.data['pools']
+            if not pools.get('approved'):
+                raise ApiError(409, 'Najpierw zatwierdź wszystkie grupy.')
+            if pools.get('round', 1) >= 2:
+                raise ApiError(409, 'Druga tura grup już istnieje.')
+            if self.data['bracket'] is not None:
+                raise ApiError(409, 'Najpierw usuń drabinkę.')
+            ranked = self._overall_ranking()
+            total = len(ranked)
+            if not is_int(pool_size) or not 2 <= pool_size <= total:
+                raise ApiError(400, 'Rozmiar grupy musi być liczbą całkowitą od 2 do {}.'.format(total))
+            if not is_int(boards) or not 1 <= boards <= MAX_BOARDS:
+                raise ApiError(400, 'Górny limit plansz musi być liczbą od 1 do {}.'.format(MAX_BOARDS))
+            count = max(1, min(-(-total // pool_size), total // 2))
+            clubs = self._club_keys()
+            groups = []
+            for k, members in enumerate(snake_groups([r['id'] for r in ranked], count)):
+                members = random.sample(members, len(members))
+                bouts, used = schedule.build_bouts(members, boards, clubs, new_id)
+                groups.append({'name': 'Grupa {}'.format(k + 1), 'fencerIds': members, 'boards': boards,
+                               'boardsUsed': used, 'closed': False, 'bouts': bouts})
+            self.data['rounds'].append({'round': pools.get('round', 1), 'standings': self._ranking_snapshot()})
+            advance = pools.get('advanceCount')
+            self.data['pools'] = {'poolSize': pool_size, 'advanceCount': None if advance is None else min(advance, total),
+                                  'groups': groups, 'approved': False, 'round': pools.get('round', 1) + 1}
+            self._save()
+
+    def create_bracket(self, advance):
+        with self.lock:
+            pools = self.data['pools']
+            if not pools.get('approved'):
+                raise ApiError(409, 'Najpierw zatwierdź wszystkie grupy.')
+            if self.data['bracket'] is not None:
+                raise ApiError(409, 'Drabinka już istnieje. Najpierw ją usuń.')
+            ranked = self._overall_ranking()
+            if advance is None:
+                advance = pools.get('advanceCount')
+            if not is_int(advance) or not 2 <= advance <= len(ranked):
+                raise ApiError(400, 'Liczba zawodników w drabince musi być liczbą od 2 do {}.'.format(len(ranked)))
+            seeds = [r['id'] for r in ranked[:advance]]
+            size = 2
+            while size < advance:
+                size *= 2
+            order = bracket_order(size)
+            first = []
+            for i in range(0, size, 2):
+                a = seeds[order[i] - 1] if order[i] <= advance else None
+                b = seeds[order[i + 1] - 1] if order[i + 1] <= advance else None
+                bye = (a is None) != (b is None)
+                first.append({'id': new_id(), 'a': a, 'b': b, 'sa': None, 'sb': None, 'bye': bye,
+                              'winner': (a or b) if bye else None})
+            rounds = [first]
+            while len(rounds[-1]) > 1:
+                rounds.append([{'id': new_id(), 'a': None, 'b': None, 'sa': None, 'sb': None, 'bye': False, 'winner': None}
+                               for _ in range(len(rounds[-1]) // 2)])
+            third = None
+            if size >= 4 and not any(b['bye'] for b in rounds[-2]):
+                third = {'id': new_id(), 'a': None, 'b': None, 'sa': None, 'sb': None, 'bye': False, 'winner': None}
+            bracket = {'size': size, 'count': advance, 'seeds': seeds, 'rounds': rounds, 'third': third}
+            self._propagate(bracket)
+            self.data['bracket'] = bracket
+            self._save()
+
+    @staticmethod
+    def _loser(bout):
+        if bout is None or bout['winner'] is None or bout['bye']:
+            return None
+        return bout['b'] if bout['winner'] == bout['a'] else bout['a']
+
+    def _propagate(self, bracket):
+        """Wstawia zwycięzców do kolejnych walk i przegranych półfinałów do walki o 3. miejsce."""
+        rounds = bracket['rounds']
+        for r in range(1, len(rounds)):
+            for i, bout in enumerate(rounds[r]):
+                bout['a'] = rounds[r - 1][2 * i]['winner']
+                bout['b'] = rounds[r - 1][2 * i + 1]['winner']
+        if bracket['third'] is not None:
+            semis = rounds[-2]
+            bracket['third']['a'] = self._loser(semis[0])
+            bracket['third']['b'] = self._loser(semis[1])
+
+    def bracket_set_score(self, bout_id, sa, sb):
+        with self.lock:
+            bracket = self.data['bracket']
+            if bracket is None:
+                raise ApiError(404, 'Drabinka nie istnieje.')
+            found = None
+            for r, rnd in enumerate(bracket['rounds']):
+                for i, b in enumerate(rnd):
+                    if b['id'] == bout_id:
+                        found = (r, i, b)
+            if found is None and bracket['third'] is not None and bracket['third']['id'] == bout_id:
+                found = (-1, 0, bracket['third'])
+            if found is None:
+                raise ApiError(404, 'Nie ma takiej walki.')
+            r, i, bout = found
+            if bout['bye'] or bout['a'] is None or bout['b'] is None:
+                raise ApiError(409, 'W tej walce nie są jeszcze znani obaj zawodnicy.')
+            for v in (sa, sb):
+                if v is not None and (not is_int(v) or not 0 <= v <= DE_THRESHOLD):
+                    raise ApiError(400, 'Wynik musi być liczbą całkowitą od 0 do {}.'.format(DE_THRESHOLD))
+            if sa is not None and sb is not None and sa == sb:
+                raise ApiError(400, 'Wynik nie może być remisem, ktoś musi wygrać.')
+            new_winner = None
+            if sa is not None and sb is not None:
+                new_winner = bout['a'] if sa > sb else bout['b']
+            if new_winner != bout['winner']:
+                downstream = []
+                if r >= 0 and r + 1 < len(bracket['rounds']):
+                    downstream.append(bracket['rounds'][r + 1][i // 2])
+                if r == len(bracket['rounds']) - 2 and bracket['third'] is not None:
+                    downstream.append(bracket['third'])
+                if any(d['sa'] is not None or d['sb'] is not None for d in downstream):
+                    raise ApiError(409, 'Walka następnej rundy ma już wynik. Najpierw usuń jej wynik.')
+            bout['sa'], bout['sb'], bout['winner'] = sa, sb, new_winner
+            self._propagate(bracket)
+            self._save()
+
+    def delete_bracket(self):
+        with self.lock:
+            self.data['bracket'] = None
+            self._save()
+
+    # --- nowy turniej ---
+
+    def new_tournament(self):
+        """Archiwizuje bieżące dane do katalogu archiwum/ i czyści turniej (wczytana klasyfikacja zostaje)."""
+        with self.lock:
+            archive = None
+            if self.data['fencers'] or self._pools_locked():
+                directory = os.path.join(os.path.dirname(os.path.abspath(self.path)), 'archiwum')
+                archive = time.strftime('turniej-%Y-%m-%d_%H-%M-%S.json')
+                try:
+                    os.makedirs(directory, exist_ok=True)
+                    with open(os.path.join(directory, archive), 'w', encoding='utf-8') as f:
+                        json.dump(self.data, f, ensure_ascii=False)
+                except OSError as e:
+                    raise ApiError(500, 'Nie udało się zapisać archiwum: {}'.format(e))
+            fresh = default_data()
+            fresh['ranking'] = self.data['ranking']
+            self.data = fresh
+            self._save()
+            return archive
+
     # --- widok dla panelu ---
 
     def _board_offsets(self):
-        """Fizyczne numery plansz: pula 1 dostaje plansze 1..k1, pula 2 kolejne itd."""
+        """Fizyczne numery plansz: grupa 1 dostaje plansze 1..k1, grupa 2 kolejne itd."""
         offsets, total = [], 0
         for g in self.data['pools']['groups']:
             offsets.append(total)
@@ -747,6 +1096,8 @@ class Store:
                 'fencers': self.admin_fencers(),
                 'pools': self._decorated_pools(),
                 'registrationOpen': self.data['registrationOpen'],
+                'bracket': self.data['bracket'],
+                'rounds': self.data['rounds'],
                 'ranking': {'count': len(ranking['entries']), 'source': ranking['source'],
                             'importedAt': ranking['importedAt']},
             }
@@ -888,9 +1239,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(201, view)
         if method == 'POST' and path == '/api/me':
             return self._json(200, self._player_view(self._read_body().get('token')))
+        if method == 'POST' and path == '/api/me/ranking':
+            return self._json(200, STORE.player_ranking(self._read_body().get('token')))
         if method == 'POST' and path == '/api/bout/score':
             body = self._read_body()
             STORE.player_score(body.get('token'), body.get('id'), body.get('mine'), body.get('theirs'))
+            return self._json(200, self._player_view(body.get('token')))
+        if method == 'POST' and path == '/api/bout/request-edit':
+            body = self._read_body()
+            STORE.player_request_edit(body.get('token'), body.get('id'))
             return self._json(200, self._player_view(body.get('token')))
         if method == 'POST' and path == '/api/bout/dispute':
             body = self._read_body()
@@ -928,6 +1285,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._read_body()
             STORE.admin_set_score(body.get('id'), body.get('sa'), body.get('sb'))
             return self._json(200, {'pools': STORE.admin_pools()})
+        if method == 'POST' and route == 'bout/approve-edit':
+            STORE.admin_approve_edit(self._read_body().get('id'))
+            return self._json(200, {'pools': STORE.admin_pools()})
         if method == 'POST' and route == 'bout/referee':
             body = self._read_body()
             STORE.admin_set_referee(body.get('id'), body.get('referee'))
@@ -935,6 +1295,13 @@ class Handler(BaseHTTPRequestHandler):
         if method == 'POST' and route == 'group/boards':
             body = self._read_body()
             STORE.admin_set_boards(body.get('group'), body.get('boards'))
+            return self._json(200, {'pools': STORE.admin_pools()})
+        if method == 'POST' and route == 'group/move':
+            body = self._read_body()
+            fencer_id = body.get('fencer')
+            if not isinstance(fencer_id, str):
+                raise ApiError(400, 'Podaj zawodnika.')
+            STORE.admin_move_fencer(fencer_id, body.get('to'))
             return self._json(200, {'pools': STORE.admin_pools()})
         if method == 'POST' and route == 'group/closed':
             body = self._read_body()
@@ -945,21 +1312,38 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(is_open, bool):
                 raise ApiError(400, 'Oczekiwano pola open (true/false).')
             return self._json(200, {'registrationOpen': STORE.set_registration(is_open)})
-        if method == 'POST' and route == 'ranking/fetch':
-            url = clean(self._read_body().get('url'))
-            entries = fetch_ranking(url)
-            updated = STORE.import_ranking(entries, url)
-            return self._json(200, {'count': len(entries), 'updated': updated})
-        if method == 'POST' and route == 'ranking/paste':
-            text = self._read_body().get('text')
+        if method == 'POST' and route == 'groups/approve':
+            STORE.approve_groups(self._read_body().get('approved'))
+            return self._json(200, {'ok': True})
+        if method == 'POST' and route == 'round2':
+            body = self._read_body()
+            STORE.create_round2(body.get('poolSize'), body.get('boards'))
+            return self._json(200, {'ok': True})
+        if method == 'POST' and route == 'bracket':
+            STORE.create_bracket(self._read_body().get('count'))
+            return self._json(200, {'ok': True})
+        if method == 'POST' and route == 'bracket/delete':
+            STORE.delete_bracket()
+            return self._json(200, {'ok': True})
+        if method == 'PUT' and route == 'bracket/bout':
+            body = self._read_body()
+            STORE.bracket_set_score(body.get('id'), body.get('sa'), body.get('sb'))
+            return self._json(200, {'ok': True})
+        if method == 'POST' and route == 'tournament/new':
+            return self._json(200, {'archive': STORE.new_tournament()})
+        if method == 'POST' and route == 'ranking/file':
+            body = self._read_body()
+            text, name = body.get('text'), clean(body.get('filename'))
             if not isinstance(text, str) or not text.strip():
-                raise ApiError(400, 'Wklej tabelę klasyfikacji.')
-            entries = parse_ranking_text(text)
+                raise ApiError(400, 'Plik jest pusty.')
+            entries, skipped = parse_ranking_html(text)
             if not entries:
-                raise ApiError(422, 'Nie rozpoznano tabeli. Skopiuj całą tabelę ze strony PZSzerm '
-                                    '(od nagłówka „Miejsce”) i wklej ją ponownie.')
-            updated = STORE.import_ranking(entries, 'wklejona tabela')
-            return self._json(200, {'count': len(entries), 'updated': updated})
+                raise ApiError(422, 'Nie rozpoznano tabeli w pliku. Zapisz stronę klasyfikacji jako '
+                                    '„Strona internetowa, tylko HTML” (tabela musi mieć nagłówek „Miejsce”).')
+            updated = STORE.import_ranking(entries, skipped, 'plik ' + (name or 'bez nazwy'))
+            return self._json(200, {'count': len(entries), 'skipped': len(skipped), 'updated': updated})
+        if method == 'GET' and route == 'ranking/entries':
+            return self._json(200, STORE.ranking_preview())
         raise ApiError(404, 'Nie znaleziono.')
 
 
